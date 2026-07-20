@@ -8,6 +8,11 @@ __pycache__/
 # real career data never enters the repo — demo seed only
 data/private/
 *_real_pool.yaml
+# local databases are state, not source
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 node_modules/
 .next/
 dist/

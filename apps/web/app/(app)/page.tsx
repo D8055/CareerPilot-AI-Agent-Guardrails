@@ -1,0 +1,403 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useState, type FormEvent } from "react";
+import { api, isOwner } from "@/lib/api";
+import { useApi, useLive } from "@/lib/hooks";
+import type { Job, Question, Runner, Stats } from "@/lib/types";
+import {
+  EmptyState,
+  ErrorNote,
+  Eyebrow,
+  Loading,
+  MatchGauge,
+  fmtWhen,
+} from "@/components/ui";
+
+const COLUMNS = [
+  "discovered",
+  "tailored",
+  "applied",
+  "interview",
+  "offer",
+  "rejected",
+];
+
+export default function Dashboard() {
+  const owner = isOwner();
+
+  const jobs = useApi(useCallback(() => api<Job[]>("/jobs"), []));
+  const stats = useApi(useCallback(() => api<Stats>("/stats"), []));
+  const runners = useApi(useCallback(() => api<Runner[]>("/status/runners"), []));
+  const questions = useApi(useCallback(() => api<Question[]>("/questions"), []));
+
+  const refreshAll = useCallback(() => {
+    jobs.refetch();
+    stats.refetch();
+    runners.refetch();
+    questions.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs.refetch, stats.refetch, runners.refetch, questions.refetch]);
+
+  const wsOpen = useLive(refreshAll);
+
+  const runnerOnline = (runners.data ?? []).some((r) => r.online);
+
+  const byColumn: Record<string, Job[]> = {};
+  const extras: string[] = [];
+  for (const job of jobs.data ?? []) {
+    const col = COLUMNS.includes(job.status) ? job.status : job.status;
+    if (!COLUMNS.includes(col) && !extras.includes(col)) extras.push(col);
+    (byColumn[col] ??= []).push(job);
+  }
+  const allColumns = [...COLUMNS, ...extras];
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* ---- instrument cluster ---- */}
+      <section aria-label="Pipeline stats">
+        <div className="panel px-5 py-4">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+            <Readout label="Jobs" value={stats.data?.jobs_total} />
+            <Readout label="Plans" value={stats.data?.plans} />
+            <Readout label="Open questions" value={stats.data?.open_questions} />
+            <Readout label="QC pending" value={stats.data?.quality_passes_pending} />
+
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Link
+                href="/settings"
+                className="chip chip-amber !text-[0.75rem] !px-3 !py-1.5 font-semibold hover:brightness-110"
+                title="Open blockers in Settings"
+              >
+                Waiting on Dhiren: {stats.data?.waiting_on_dhiren ?? "–"}
+              </Link>
+              {runners.data &&
+                (runnerOnline ? (
+                  <span className="chip chip-green">
+                    <span className="pulse inline-block h-1.5 w-1.5 rounded-full bg-green" />
+                    runner online
+                  </span>
+                ) : (
+                  <span className="chip chip-amber">
+                    quality passes paused — runner offline
+                  </span>
+                ))}
+              <span
+                className="chip"
+                title={wsOpen ? "Live via WebSocket" : "Refreshing every 15s"}
+              >
+                <span
+                  className={`inline-block h-1.5 w-1.5 rounded-full ${
+                    wsOpen ? "pulse bg-cyan" : "bg-faint"
+                  }`}
+                />
+                {wsOpen ? "live" : "polling"}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="ruler mx-3 mt-1" aria-hidden />
+      </section>
+
+      {stats.error && <ErrorNote message={stats.error} />}
+      {jobs.error && !stats.error && <ErrorNote message={jobs.error} />}
+
+      {/* ---- pipeline board ---- */}
+      <section aria-label="Pipeline board" className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h1 className="display text-lg font-semibold">Pipeline</h1>
+          {owner && <AddJob onAdded={refreshAll} />}
+        </div>
+
+        {jobs.loading ? (
+          <Loading label="Reading the pipeline" />
+        ) : (jobs.data ?? []).length === 0 ? (
+          <EmptyState>
+            No jobs on the board yet. Add one above, or push one through the
+            API or a connected MCP client.
+          </EmptyState>
+        ) : (
+          <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6">
+            <div className="flex min-w-max gap-3">
+              {allColumns.map((col) => {
+                const items = byColumn[col] ?? [];
+                if (items.length === 0 && !COLUMNS.includes(col)) return null;
+                return (
+                  <div key={col} className="w-60 shrink-0">
+                    <div className="mb-2 flex items-baseline justify-between px-1">
+                      <Eyebrow>{col}</Eyebrow>
+                      <span className="readout text-xs text-faint">
+                        {items.length}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {items.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-xs text-faint">
+                          empty
+                        </div>
+                      ) : (
+                        items.map((job) => <JobCard key={job.id} job={job} />)
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ---- open questions ---- */}
+      <QuestionsPanel
+        questions={questions.data}
+        error={questions.error}
+        owner={owner}
+        onAnswered={refreshAll}
+      />
+    </div>
+  );
+}
+
+function Readout({ label, value }: { label: string; value: number | undefined }) {
+  return (
+    <div className="flex flex-col">
+      <span className="eyebrow">{label}</span>
+      <span className="readout text-2xl font-semibold leading-tight">
+        {value ?? "–"}
+      </span>
+    </div>
+  );
+}
+
+function JobCard({ job }: { job: Job }) {
+  const flagged = (job.missing_keywords ?? []).length;
+  return (
+    <Link
+      href={`/jobs/${job.id}`}
+      className="panel block p-3 transition-colors hover:border-[var(--accent)]"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{job.company}</div>
+          <div className="truncate text-xs text-dim">{job.role}</div>
+        </div>
+        <MatchGauge score={job.match} size={38} />
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        {job.ats && <span className="chip">{job.ats}</span>}
+        {job.channel && <span className="chip">{job.channel}</span>}
+        {flagged > 0 && (
+          <span className="chip chip-amber" title="Missing JD keywords — flagged, never added">
+            {flagged} flagged
+          </span>
+        )}
+      </div>
+      <div className="readout mt-2 text-[0.65rem] text-faint">
+        added {fmtWhen(job.added_at)}
+      </div>
+    </Link>
+  );
+}
+
+function AddJob({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    url: "",
+    company: "",
+    role: "",
+    channel: "",
+    jd_text: "",
+  });
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/jobs", { method: "POST", body: form });
+      setForm({ url: "", company: "", role: "", channel: "", jd_text: "" });
+      setOpen(false);
+      onAdded();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add the job.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button type="button" className="btn" onClick={() => setOpen((v) => !v)}>
+        {open ? "Close" : "Add job"}
+      </button>
+      {open && (
+        <form
+          onSubmit={submit}
+          className="panel absolute right-0 z-10 mt-2 flex w-[min(36rem,88vw)] flex-col gap-3 p-4"
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1">
+              <span className="eyebrow">Company</span>
+              <input
+                className="input"
+                required
+                value={form.company}
+                onChange={(e) => setForm({ ...form, company: e.target.value })}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="eyebrow">Role</span>
+              <input
+                className="input"
+                required
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="eyebrow">URL</span>
+              <input
+                className="input"
+                type="url"
+                required
+                value={form.url}
+                onChange={(e) => setForm({ ...form, url: e.target.value })}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="eyebrow">Channel</span>
+              <input
+                className="input"
+                placeholder="e.g. linkedin, referral"
+                value={form.channel}
+                onChange={(e) => setForm({ ...form, channel: e.target.value })}
+              />
+            </label>
+          </div>
+          <label className="flex flex-col gap-1">
+            <span className="eyebrow">Job description text</span>
+            <textarea
+              className="textarea min-h-24"
+              value={form.jd_text}
+              onChange={(e) => setForm({ ...form, jd_text: e.target.value })}
+            />
+          </label>
+          {error && <p className="text-sm text-red">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-quiet" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? "Adding…" : "Add job"}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function QuestionsPanel({
+  questions,
+  error,
+  owner,
+  onAnswered,
+}: {
+  questions: Question[] | null;
+  error: string | null;
+  owner: boolean;
+  onAnswered: () => void;
+}) {
+  const open = (questions ?? []).filter((q) => !q.answer);
+  const answered = (questions ?? []).filter((q) => !!q.answer);
+
+  if (error) return null; // stats strip already surfaces API trouble
+
+  return (
+    <section aria-label="Open questions" className="flex flex-col gap-3">
+      <h2 className="display text-lg font-semibold">Questions for Dhiren</h2>
+      {questions === null ? (
+        <Loading label="Checking questions" />
+      ) : open.length === 0 && answered.length === 0 ? (
+        <EmptyState>No questions right now. Tailoring will raise one when the record can&apos;t answer a JD.</EmptyState>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {open.map((q) => (
+            <QuestionRow key={q.id} q={q} owner={owner} onAnswered={onAnswered} />
+          ))}
+          {answered.length > 0 && (
+            <details className="mt-1">
+              <summary className="cursor-pointer text-xs text-faint">
+                {answered.length} answered
+              </summary>
+              <div className="mt-2 flex flex-col gap-2">
+                {answered.map((q) => (
+                  <div key={q.id} className="panel px-4 py-3 opacity-70">
+                    <div className="text-sm">{q.question ?? q.text}</div>
+                    <div className="mt-1 text-xs text-dim">↳ {q.answer}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function QuestionRow({
+  q,
+  owner,
+  onAnswered,
+}: {
+  q: Question;
+  owner: boolean;
+  onAnswered: () => void;
+}) {
+  const [answer, setAnswer] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/questions/${q.id}/answer`, {
+        method: "POST",
+        body: { answer },
+      });
+      onAnswered();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the answer.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel px-4 py-3">
+      <div className="text-sm">{q.question ?? q.text ?? `Question ${q.id}`}</div>
+      {owner ? (
+        <form onSubmit={submit} className="mt-2 flex gap-2">
+          <input
+            className="input"
+            placeholder="Answer truthfully — this feeds the career record"
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            required
+          />
+          <button type="submit" className="btn shrink-0" disabled={busy}>
+            {busy ? "Saving…" : "Save answer"}
+          </button>
+        </form>
+      ) : (
+        <div className="mt-1 text-xs text-faint">Awaiting the owner&apos;s answer.</div>
+      )}
+      {error && <p className="mt-1 text-sm text-red">{error}</p>}
+    </div>
+  );
+}

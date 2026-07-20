@@ -1,23 +1,14 @@
 """API smoke tests: the deterministic core works keyless, end to end."""
-import sys
-from pathlib import Path
-
-from fastapi.testclient import TestClient
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "api"))
-from main import app  # noqa: E402
-
-client = TestClient(app)
 
 
-def test_health():
+def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
     assert r.json()["pool_bullets"] > 10
 
 
-def test_tailor_returns_validated_plan():
+def test_tailor_returns_validated_plan(client):
     jd = "React and .NET developer with SQL, Docker, and data pipelines."
     r = client.post("/tailor", json={"jd_text": jd})
     assert r.status_code == 200
@@ -29,5 +20,5 @@ def test_tailor_returns_validated_plan():
     assert body["honesty_violations"] == []
 
 
-def test_tailor_rejects_empty_jd():
+def test_tailor_rejects_empty_jd(client):
     assert client.post("/tailor", json={"jd_text": ""}).status_code == 422

@@ -30,17 +30,30 @@ infra/            docker-compose (Postgres+pgvector, Redis), CI
 data/             demo_career_pool.yaml — FICTIONAL seed data
 ```
 
-## Quickstart (Phase 0)
+## Quickstart
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\python -m pytest tests/ -q          # ported test suite
+.venv\Scripts\python -m pytest tests/ -q           # full test suite
 .venv\Scripts\uvicorn main:app --app-dir apps/api  # http://127.0.0.1:8000/docs
 ```
 
-Try it: `POST /tailor` with `{"jd_text": "React and .NET developer with SQL"}`
-returns a match score, matched/missing keywords, and a validated selection plan.
+First start prints a one-time owner password (or set
+`CAREERPILOT_OWNER_PASSWORD`). The web UI lives in `apps/web`
+(`npm install && npm run dev` → http://localhost:3000).
+
+**Connect Claude (MCP):** `claude mcp add careerpilot -- python apps/api/mcp_server.py`
+from the repo root — seven tools (search/add/tailor jobs, career record,
+questions, stats) drive the product from any MCP client.
+
+**Quality passes:** deterministic tailoring is instant and always live; the
+local runner (`apps/runner/`) upgrades summaries via the Claude Agent SDK on
+the owner's subscription. It is started manually — see its README.
+
+**Blockers as state:** `GET /status/blockers` (and the Settings page) tracks
+what is waiting on the owner (accounts, nods) vs resolved — the build's
+outstanding needs live in the product, not in a doc.
 
 ## Privacy
 

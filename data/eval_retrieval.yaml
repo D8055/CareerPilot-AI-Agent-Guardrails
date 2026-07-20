@@ -1,0 +1,44 @@
+# Retrieval eval set: 20 hand-labeled JD-snippet -> expected career item refs.
+# recall@5 = fraction of pairs where any expected ref appears in the top 5.
+# Labeled against the FICTIONAL demo pool; relabel when a private pool is used.
+pairs:
+  - jd: "Experience with GIS and geospatial data rendering on interactive maps"
+    expected: [cityworks-gis, cityworks-viz]
+  - jd: "Build ETL data pipelines with validation and reliability guarantees"
+    expected: [cityworks-etl, cityworks-quarantine, datalab-clean]
+  - jd: "Optimize API performance at scale for large datasets"
+    expected: [cityworks-scale, marketplace-search]
+  - jd: "Data quality: quarantine bad records and reconcile corrections"
+    expected: [cityworks-quarantine]
+  - jd: "Role based access control and authentication for sensitive data"
+    expected: [cityworks-auth, tracker-auth]
+  - jd: "D3.js data visualization of parsed geometry"
+    expected: [cityworks-viz]
+  - jd: "Python web scraping automation to reduce manual data collection"
+    expected: [datalab-scraper]
+  - jd: "Clean and normalize datasets with Pandas for research"
+    expected: [datalab-clean]
+  - jd: "Statistical analysis and matplotlib visualization notebooks"
+    expected: [datalab-stats]
+  - jd: "Write pytest unit tests and set up CI pipelines"
+    expected: [datalab-review, tracker-tests]
+  - jd: "React and TypeScript frontend with a FastAPI backend on PostgreSQL"
+    expected: [tracker-board]
+  - jd: "JWT authentication with owner and read only reviewer roles"
+    expected: [tracker-auth]
+  - jd: "Playwright browser test automation in CI"
+    expected: [tracker-tests, datalab-review]
+  - jd: "Computer vision face detection prototype in Python"
+    expected: [visionapp-detect]
+  - jd: "Privacy first design: anonymized ids, data never leaves the device"
+    expected: [visionapp-privacy]
+  - jd: "Express REST API with MongoDB for listings and messaging"
+    expected: [marketplace-api]
+  - jd: "Full text search with pagination that stays fast as data grows"
+    expected: [marketplace-search]
+  - jd: "Docker Compose containerized local development setup"
+    expected: [marketplace-deploy]
+  - jd: "Prompt engineering pipelines for structured LLM extraction"
+    expected: [chatbot-prompt]
+  - jd: "Slack bot with rate limits shipped to a workspace"
+    expected: [chatbot-slack]
