@@ -16,6 +16,10 @@ automated applying.
   over **MCP**. No `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` code paths exist.
 - Every previously identified breakage point now has its fix designed in (§7).
 - Prerequisites & blockers are tracked in the spec itself (§8).
+- **Lightweight footprint rule (Dhiren, 2026-07-20): nothing heavy runs on his
+  PC.** No local LLMs (Ollama is out entirely), no GPU workloads. The heaviest
+  local component is a ~100 MB CPU embedding model; Docker stacks (analytics,
+  n8n) start on demand for demos and stop afterward — nothing stays resident.
 
 ---
 
@@ -149,11 +153,12 @@ Runs on Dhiren's PC (manual start or a scheduled task). Polls `intelligence_jobs
 - Interrupts (LangGraph checkpoints) pause for human answers — the match-boost
   Q&A becomes a first-class graph interrupt surfaced in the UI.
 - **Comparison crew (Phase 3):** the same tailor task in CrewAI. CrewAI expects a
-  generic LLM endpoint, and wrapping subscription auth into one is off-limits —
-  so **the comparison benchmark runs both frameworks on the same local Ollama
-  model** (fair apples-to-apples, zero spend). Claude-via-SDK remains the
-  production path; the writeup notes both configurations. Ollama is therefore an
-  *optional Phase 3 install*, not a core dependency.
+  generic LLM endpoint; wrapping subscription auth into one is off-limits, and
+  local models are ruled out by the lightweight rule. **Default: the live
+  benchmark is deferred and CrewAI is NOT claimed** (honesty rule: no claim
+  without a real run). Optional unlock (B9): a genuinely free hosted tier
+  (e.g. Groq or Google AI Studio free quota) powers the one-off benchmark for
+  both frameworks — same model for both, zero dollars, Dhiren's call.
 
 ### 2.4 Claude-plan integration (the two link points)
 1. **Interactive:** any Claude client (Code, Desktop) connects to the product via
@@ -169,6 +174,8 @@ Both paths hit the same API with the same auth and the same honesty boundary.
 - **Embeddings: in-process CPU model via `fastembed`/sentence-transformers
   (bge-small-en) — pip-installable, free, runs everywhere including the deployed
   API and CI. This removes rev 1's Ollama dependency for embeddings entirely.**
+  At ~100 MB and CPU-only it is the heaviest thing that ever runs locally, and
+  it only runs at index/query time — within the lightweight rule.
 - Chunking: per-bullet (already atomic) + per-JD-section.
 - Query: JD → top-k evidence with scores; the tailor node consumes ONLY retrieved
   tier-1 evidence (retrieval is the honesty boundary, mirrored from this repo's
@@ -244,14 +251,14 @@ eval shows the delta.
 |---|---|---|
 | Frontend | React, TypeScript, CSS, UI-state, pixel-accuracy discipline | **Next.js, Tailwind CSS, Vercel, authentication/RBAC** |
 | Core API | Python, PostgreSQL, SQL, schema design, REST concepts, Docker | **FastAPI, Redis (local queue), managed-Postgres deploy** |
-| Agent core / runner | prompt engineering, LLM structured extraction, Python | **LangGraph, CrewAI (comparison), multi-agent architecture, Claude Agent SDK** |
+| Agent core / runner | prompt engineering, LLM structured extraction, Python | **LangGraph, multi-agent architecture, Claude Agent SDK** (CrewAI only if B9 approved) |
 | MCP mount | API contract design (PruTech), Python | **MCP** |
 | RAG | ETL/data pipelines, data cleaning | **RAG, vector database, embeddings** |
 | Evals | testing discipline (170 Playwright), root-cause habits | **LLM evals** |
 | Analytics wing | Java (3 projects), SQL, OOP, Docker Compose | **Spring Boot, Kafka (via Redpanda's Kafka API), microservices, MySQL** |
 | Automation | web scraping, workflow thinking (soybean admin flow) | **n8n, Slack API** (Zapier optional) |
 | Infra/CI | Docker, Compose, CI/CD, Git/GitHub, Azure Pipelines patterns | GitHub Actions (Tier-2 confirm) |
-| Stretch | — | **fine-tuning**, local LLMs (Ollama, via the comparison bench) |
+| Stretch | — | **fine-tuning** (Colab, not local) |
 
 Honesty note on the rev 2 trade: dropping paid API calls means **"OpenAI API"
 cannot be claimed** (no real calls — don't claim it). "Anthropic" is earned as
@@ -270,7 +277,7 @@ GitHub workflows).
 | **0** (new — pure port, zero blockers) | Monorepo scaffold; port pool ETL, honesty guard, validators, deterministic tailor into `packages/shared`+`apps/api` with tests; local compose (pg+pgvector, redis) | Ported test suite green in the new repo; deterministic tailor of a real JD via local API | — (foundation) |
 | **1** (weekend) | FastAPI + Postgres; MCP mount; runner skeleton + Agent SDK loop; LangGraph graph on the runner | Graph tailors a real JD end-to-end with **zero API spend**; Claude connects via the one-liner and drives it | FastAPI, LangGraph, multi-agent, MCP, Claude Agent SDK |
 | **2** | Next.js/Tailwind UI + JWT/RBAC (proxy pattern §2.1); deploy Vercel + Neon + free container host | Live URL, login works, pipeline board renders from the API; runner-offline badge works | Next.js, Tailwind, Vercel, authentication |
-| **3** | pgvector RAG (fastembed) + eval harness + CrewAI comparison (both frameworks on Ollama) | Retrieval evals reported; eval scoreboard live; comparison writeup in README | RAG, vector DB, embeddings, LLM evals, CrewAI |
+| **3** | pgvector RAG (fastembed) + eval harness; CrewAI comparison only if B9 approved | Retrieval evals reported; eval scoreboard live | RAG, vector DB, embeddings, LLM evals (CrewAI only with B9) |
 | **4** | JDK 21 install; n8n + Slack; Spring Boot/Redpanda/MySQL analytics wing (local compose) | Slack DM fires on job-add; funnel stats served from MySQL | n8n, Slack API, Spring Boot, Kafka, microservices, MySQL |
 | **5** (stretch) | LoRA fine-tune + eval delta; optional agent-browser applier | Eval shows measurable delta | fine-tuning |
 
@@ -307,7 +314,7 @@ nothing on this list is left to be discovered at deploy time.
 | 7.6 | UI referencing fields the schema lacked | rev 1 `jobs` had no fit/missing-keyword columns and no status history | `fit_score`, `missing_keywords`, `status_events` added to the data model (§3). |
 | 7.7 | CI flaking/failing on LLM access | Judge metrics need a model; CI has no subscription | CI gates are fully deterministic; LLM-judge runs as runner batch jobs (§2.6). |
 | 7.8 | Embeddings blocked on Ollama install | rev 1 defaulted embeddings to Ollama, which isn't installed | In-process fastembed/bge-small — pip install, CPU, runs in CI and prod (§2.5). |
-| 7.9 | CrewAI needing an API endpoint | No API credits, and wrapping subscription auth as a generic endpoint is off-limits | Comparison bench runs both frameworks on local Ollama (optional, Phase 3 only) (§2.3). |
+| 7.9 | CrewAI needing an API endpoint | No API credits, wrapping subscription auth as a generic endpoint is off-limits, and local models are ruled out by the lightweight rule | Benchmark deferred by default and CrewAI not claimed; optional free hosted tier unlocks it (B9) (§2.3). |
 | 7.10 | Core deploy depending on Kafka/Redis add-ons | Kafka in prod is disproportionate; every add-on is another account/cost | Outbox pattern with no-op relay; Postgres-backed queue + rate ledger in prod; Redis stays a local-compose skill (§2.2, §2.7). |
 
 ---
@@ -329,7 +336,7 @@ passes 105 tests in this repo.
 | B6 | Confirm Max-plan headroom for runner batches | Phase 1 quality passes | decision only | Runner draws on the same plan as interactive sessions; nightly batching + queue backoff keeps it polite. No dollars involved. |
 | B7 | JDK 21 (Temurin) install | Phase 4 analytics wing | 10 min, winget | Claude can run the install with permission when Phase 4 starts |
 | B8 | Slack workspace + bot app token | Phase 4 automation | 20 min / free | |
-| B9 | Ollama install + one small model | Phase 3 comparison bench only | 20 min + disk / free | Optional — nothing else depends on it (embeddings no longer do) |
+| B9 | Free hosted-tier model account (Groq or Google AI Studio free quota) for the one-off CrewAI benchmark | Phase 3 CrewAI claim only | 15 min / $0 | Optional — default is to skip the benchmark and not claim CrewAI. Local models are ruled out by the lightweight rule. |
 | B10 | Colab account | Phase 5 stretch | free | Optional |
 
 ### Accepted constraints (not blockers — acknowledged trade-offs)
@@ -339,3 +346,5 @@ passes 105 tests in this repo.
 - **Max-plan rate limits** bound runner throughput; the queue absorbs bursts.
 - **Free-tier cold starts** (~30 s) on the API host after idle periods.
 - **"OpenAI API" is not claimable** under the zero-spend rule (see §4).
+- **Nothing heavy runs locally:** no local LLMs or GPU work, ever; the compose
+  stacks (analytics, n8n) are demo-time only — started for a demo, stopped after.
