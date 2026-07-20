@@ -16,7 +16,7 @@ from sqlalchemy import select
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import services  # noqa: E402
-from auth import hash_password  # noqa: E402
+from auth import hash_password, verify_password  # noqa: E402
 from careerpilot_shared import (build_pool_plan, extract_jd_terms,  # noqa: E402
                                 match_score, validate_pool_plan)
 from careerpilot_shared.models import TailorReport, TailorRequest  # noqa: E402
@@ -44,16 +44,25 @@ def create_app(db_url: str | None = None) -> FastAPI:
         services.seed_blockers(db)
         if not db.query(services.CareerItem).count():
             services.etl_pool(db)
-        if not db.execute(select(User)).scalars().first():
-            email = os.environ.get("CAREERPILOT_OWNER_EMAIL", "dhirenrao@gmail.com")
-            pw = os.environ.get("CAREERPILOT_OWNER_PASSWORD")
+        email = os.environ.get("CAREERPILOT_OWNER_EMAIL", "dhirenrao@gmail.com")
+        env_pw = os.environ.get("CAREERPILOT_OWNER_PASSWORD")
+        owner = db.execute(select(User).filter_by(email=email)).scalar_one_or_none()
+        if owner is None:
+            pw = env_pw
             if not pw:
                 pw = secrets.token_urlsafe(12)
                 print(f"[careerpilot] created owner {email} with one-time "
                       f"password: {pw}  (set CAREERPILOT_OWNER_PASSWORD to "
-                      "control this; change after first login)")
+                      "control this)")
             db.add(User(email=email, pw_hash=hash_password(pw), role="owner"))
             db.commit()
+        elif env_pw and not verify_password(env_pw, owner.pw_hash):
+            # the env var always wins — otherwise a forgotten first-start
+            # password locks the owner out of their own local app
+            owner.pw_hash = hash_password(env_pw)
+            db.commit()
+            print("[careerpilot] owner password reset from "
+                  "CAREERPILOT_OWNER_PASSWORD")
 
     app.include_router(router)
 
