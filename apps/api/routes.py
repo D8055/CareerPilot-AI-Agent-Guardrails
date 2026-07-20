@@ -78,6 +78,33 @@ def list_jobs(user: dict = Depends(current_user), db: Session = Depends(get_db))
         select(Job).order_by(Job.added_at.desc())).scalars()]
 
 
+def _apply_enrichment(job: Job, db: Session) -> str:
+    """Fetch the posting and fill EMPTY fields only (owner input wins).
+    Returns a plain-English note describing what happened."""
+    import enrich
+    try:
+        found = enrich.enrich_from_url(job.url)
+    except enrich.EnrichError as e:
+        db.add(StatusEvent(job_id=job.id, status=job.status,
+                           note=f"auto-enrich failed: {e}"))
+        return f"auto-enrich failed: {e}"
+    job.company = job.company or found["company"]
+    job.role = job.role or found["role"]
+    job.ats = job.ats or found["ats"]
+    if job.channel in ("", "unknown"):
+        job.channel = found["channel"]
+    if not job.jd_text and found["jd_text"]:
+        job.jd_text = found["jd_text"]
+    got_jd = bool(job.jd_text)
+    if got_jd:
+        job.status = "enriched"
+    note = (f"auto-enriched via {found['source']}: "
+            f"{job.company or '?'} / {job.role or '?'}"
+            + ("" if got_jd else " (no JD text found — paste it manually)"))
+    db.add(StatusEvent(job_id=job.id, status=job.status, note=note))
+    return note
+
+
 @router.post("/jobs", status_code=201)
 async def add_job(body: JobBody, user: dict = Depends(require_owner),
                   db: Session = Depends(get_db)):
@@ -85,9 +112,31 @@ async def add_job(body: JobBody, user: dict = Depends(require_owner),
     db.add(job)
     db.flush()
     db.add(StatusEvent(job_id=job.id, status="discovered", note="added"))
+    note = ""
+    if job.url and not (job.company and job.role and job.jd_text):
+        note = _apply_enrichment(job, db)
     db.commit()
     await manager.broadcast({"type": "job_added", "job": _job_dict(job)})
-    return _job_dict(job)
+    out = _job_dict(job)
+    out["enrichment"] = note
+    return out
+
+
+@router.post("/jobs/{job_id}/enrich")
+async def enrich_job(job_id: int, user: dict = Depends(require_owner),
+                     db: Session = Depends(get_db)):
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "no such job")
+    if not job.url:
+        raise HTTPException(400, "job has no URL to enrich from")
+    note = _apply_enrichment(job, db)
+    db.commit()
+    await manager.broadcast({"type": "status_changed", "job_id": job_id,
+                             "status": job.status})
+    out = _job_dict(job)
+    out["enrichment"] = note
+    return out
 
 
 @router.get("/jobs/{job_id}")

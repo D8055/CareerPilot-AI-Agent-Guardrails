@@ -203,6 +203,8 @@ function AddJob({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [manual, setManual] = useState(false);
   const [form, setForm] = useState({
     url: "",
     company: "",
@@ -215,11 +217,22 @@ function AddJob({ onAdded }: { onAdded: () => void }) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await api("/jobs", { method: "POST", body: form });
+      const job = await api<{ enrichment?: string }>("/jobs", {
+        method: "POST",
+        body: form,
+      });
       setForm({ url: "", company: "", role: "", channel: "", jd_text: "" });
-      setOpen(false);
       onAdded();
+      if (job.enrichment && job.enrichment.includes("failed")) {
+        // keep the panel open so the note is seen: the job exists, but the
+        // JD needs a manual paste on its detail page
+        setNotice(job.enrichment);
+        setManual(false);
+      } else {
+        setOpen(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add the job.");
     } finally {
@@ -237,60 +250,70 @@ function AddJob({ onAdded }: { onAdded: () => void }) {
           onSubmit={submit}
           className="panel absolute right-0 z-10 mt-2 flex w-[min(36rem,88vw)] flex-col gap-3 p-4"
         >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="flex flex-col gap-1">
-              <span className="eyebrow">Company</span>
-              <input
-                className="input"
-                required
-                value={form.company}
-                onChange={(e) => setForm({ ...form, company: e.target.value })}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="eyebrow">Role</span>
-              <input
-                className="input"
-                required
-                value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value })}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="eyebrow">URL</span>
-              <input
-                className="input"
-                type="url"
-                required
-                value={form.url}
-                onChange={(e) => setForm({ ...form, url: e.target.value })}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="eyebrow">Channel</span>
-              <input
-                className="input"
-                placeholder="e.g. linkedin, referral"
-                value={form.channel}
-                onChange={(e) => setForm({ ...form, channel: e.target.value })}
-              />
-            </label>
-          </div>
           <label className="flex flex-col gap-1">
-            <span className="eyebrow">Job description text</span>
-            <textarea
-              className="textarea min-h-24"
-              value={form.jd_text}
-              onChange={(e) => setForm({ ...form, jd_text: e.target.value })}
+            <span className="eyebrow">Posting URL</span>
+            <input
+              className="input"
+              type="url"
+              required
+              autoFocus
+              placeholder="https://…"
+              value={form.url}
+              onChange={(e) => setForm({ ...form, url: e.target.value })}
             />
           </label>
+          <p className="text-xs text-faint">
+            Company, role, and the job description are fetched from the page
+            automatically. Sites that block fetching (LinkedIn does) still get
+            added — you just paste the JD on the job page afterward.
+          </p>
+          {!manual && (
+            <button
+              type="button"
+              className="self-start text-xs text-faint underline-offset-2 hover:underline"
+              onClick={() => setManual(true)}
+            >
+              Enter details manually instead
+            </button>
+          )}
+          {manual && (
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="eyebrow">Company</span>
+                  <input
+                    className="input"
+                    value={form.company}
+                    onChange={(e) => setForm({ ...form, company: e.target.value })}
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="eyebrow">Role</span>
+                  <input
+                    className="input"
+                    value={form.role}
+                    onChange={(e) => setForm({ ...form, role: e.target.value })}
+                  />
+                </label>
+              </div>
+              <label className="flex flex-col gap-1">
+                <span className="eyebrow">Job description text</span>
+                <textarea
+                  className="textarea min-h-24"
+                  value={form.jd_text}
+                  onChange={(e) => setForm({ ...form, jd_text: e.target.value })}
+                />
+              </label>
+            </>
+          )}
+          {notice && <p className="text-sm text-amber">{notice}</p>}
           {error && <p className="text-sm text-red">{error}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" className="btn btn-quiet" onClick={() => setOpen(false)}>
-              Cancel
+              {notice ? "Done" : "Cancel"}
             </button>
             <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? "Adding…" : "Add job"}
+              {busy ? "Fetching…" : "Add job"}
             </button>
           </div>
         </form>
