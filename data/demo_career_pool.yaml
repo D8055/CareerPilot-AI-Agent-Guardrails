@@ -1,0 +1,206 @@
+# FICTIONAL DEMO DATA. "Jordan Sample" does not exist. This seed exists so the
+# repo, tests, and public demo run without anyone's real career record or PII.
+# A real deployment points CAREERPILOT_POOL at a private pool file (gitignored).
+meta:
+  source: fictional demo seed (structure mirrors a real verified career pool)
+  rules: >-
+    Tier 1 / confirmed content ONLY. Tailor plans SELECT from this pool by id;
+    bullet text renders verbatim.
+  fallback_summary: >-
+    Computer science student building full stack, data driven software in
+    C#/.NET, TypeScript/React, and Python. Shipped geospatial dashboards and
+    ETL pipelines for a city planning portal and cut manual data collection
+    90% with a Python scraping platform. Finalist in a national collegiate
+    cybersecurity competition.
+
+contact:
+  name: JORDAN SAMPLE
+  location: Springfield, USA
+  phone: 555-010-0100
+  email: jordan.sample@example.com
+  linkedin: linkedin.com/in/jordansample
+  work_authorization: Demo data
+
+skills:
+  - label: Languages
+    items: [Python, "C#", TypeScript, JavaScript, SQL, Java, HTML/CSS]
+  - label: Frameworks & Tools
+    items: [React, .NET, FastAPI, Node.js, Docker, Git, Playwright]
+  - label: Data & Cloud
+    items: [PostgreSQL, SQLite, Azure, Pandas, ETL, Data Pipelines, Web Scraping]
+
+experience:
+  - id: cityworks
+    org: "CityWorks Civic Tech (demo)"
+    title: "Software Developer Intern"
+    dates: "May 2025 - Present"
+    select: {min: 3, max: 5}
+    bullets:
+      - id: cityworks-gis
+        text: >-
+          Rendered the foundation map layers for a city planning portal,
+          including district boundaries and a building footprint layer.
+        metric: ""
+        keywords: [gis, geospatial, ".net", "c#", react]
+      - id: cityworks-etl
+        text: >-
+          Built a self verifying refresh job that validates each batch in
+          memory before any database write and keeps the last good version on
+          failure.
+        metric: ""
+        keywords: [etl, data pipelines, sql, reliability, validation]
+      - id: cityworks-scale
+        text: >-
+          Loaded 850,000 parcel geometries and kept the map responsive with
+          canvas rendering and viewport scoped refetching.
+        metric: "850,000 parcel geometries"
+        keywords: [performance, api, optimization, scale, ".net"]
+      - id: cityworks-quarantine
+        text: >-
+          Extended ingestion with per row quarantine and continue, so one bad
+          row never blocks a batch and corrected data reconciles automatically.
+        metric: ""
+        keywords: [etl, data pipelines, data quality, backend]
+      - id: cityworks-auth
+        text: >-
+          Built a role gated ingest path for confidential project data with
+          access checks on every route.
+        metric: ""
+        keywords: [security, access control, authentication, backend]
+      - id: cityworks-viz
+        text: >-
+          Parsed malformed district geometry files and rendered all 70 valid
+          districts in an interactive D3.js map.
+        metric: "70 valid districts"
+        keywords: [d3.js, data visualization, parsing, javascript]
+  - id: datalab
+    org: "University Data Lab (demo)"
+    title: "Undergraduate Research Assistant"
+    dates: "Aug 2024 - May 2025"
+    select: {min: 2, max: 4}
+    bullets:
+      - id: datalab-scraper
+        text: >-
+          Built a Python scraping platform that cut manual data collection 90%
+          across three source sites.
+        metric: "90%"
+        keywords: [python, web scraping, automation, data pipelines]
+      - id: datalab-clean
+        text: >-
+          Cleaned and normalized survey datasets with Pandas and documented a
+          repeatable ETL workflow for the lab.
+        metric: ""
+        keywords: [pandas, etl, data cleaning, python]
+      - id: datalab-stats
+        text: >-
+          Produced statistical summaries and data visualization notebooks used
+          in two published lab reports.
+        metric: ""
+        keywords: [statistics, data visualization, matplotlib]
+      - id: datalab-review
+        text: >-
+          Wrote unit tests with pytest for the lab's shared utilities and set
+          up CI so every change runs the suite.
+        metric: ""
+        keywords: [pytest, unit testing, ci/cd, git]
+
+projects:
+  - id: tracker
+    name: "Job Application Tracker (demo)"
+    stack: "React, TypeScript, FastAPI, PostgreSQL"
+    select: {min: 2, max: 2}
+    bullets:
+      - id: tracker-board
+        text: >-
+          Built a React and TypeScript pipeline board backed by a FastAPI REST
+          API with PostgreSQL.
+        metric: ""
+        keywords: [react, typescript, fastapi, postgresql, rest]
+      - id: tracker-auth
+        text: >-
+          Added JWT authentication with role based access for an owner and a
+          read only reviewer.
+        metric: ""
+        keywords: [authentication, jwt, security]
+      - id: tracker-tests
+        text: >-
+          Covered the API with pytest and browser flows with Playwright in CI.
+        metric: ""
+        keywords: [pytest, playwright, ci/cd, unit testing]
+  - id: visionapp
+    name: "Attendance Vision App (demo)"
+    stack: "Python, OpenCV"
+    select: {min: 2, max: 2}
+    bullets:
+      - id: visionapp-detect
+        text: >-
+          Built a computer vision attendance prototype in Python with face
+          detection tuned for small classroom groups.
+        metric: ""
+        keywords: [python, computer vision, machine learning]
+      - id: visionapp-privacy
+        text: >-
+          Designed the data handling so images never leave the device and
+          records store only anonymized ids.
+        metric: ""
+        keywords: [security, privacy, data modeling]
+      - id: visionapp-eval
+        text: >-
+          Measured detection accuracy across lighting conditions and documented
+          the failure cases.
+        metric: ""
+        keywords: [statistics, debugging, testing]
+  - id: marketplace
+    name: "Campus Marketplace (demo)"
+    stack: "Node.js, Express, MongoDB"
+    select: {min: 2, max: 2}
+    bullets:
+      - id: marketplace-api
+        text: >-
+          Built an Express REST API with MongoDB for listings, search, and
+          messaging between buyers and sellers.
+        metric: ""
+        keywords: [node.js, express, mongodb, rest, api]
+      - id: marketplace-search
+        text: >-
+          Added indexed full text search and pagination that kept response
+          times flat as listings grew.
+        metric: ""
+        keywords: [performance, mongodb, backend]
+      - id: marketplace-deploy
+        text: >-
+          Containerized the stack with Docker Compose for one command local
+          setup.
+        metric: ""
+        keywords: [docker, devops]
+  - id: chatbot
+    name: "Study Group Chatbot (demo)"
+    stack: "Python, LLM prompt pipelines"
+    select: {min: 2, max: 2}
+    bullets:
+      - id: chatbot-prompt
+        text: >-
+          Built prompt engineering pipelines for structured extraction of study
+          topics from free text messages.
+        metric: ""
+        keywords: [prompt engineering, llm, python, generative ai]
+      - id: chatbot-guard
+        text: >-
+          Added a validation layer that rejects any generated claim not backed
+          by the source message.
+        metric: ""
+        keywords: [llm, validation, testing]
+      - id: chatbot-slack
+        text: >-
+          Shipped the bot to a campus Slack workspace with rate limits and an
+          opt out command.
+        metric: ""
+        keywords: [slack api, api, automation]
+
+accomplishments:
+  - text: >-
+      Finalist, national collegiate cybersecurity competition (demo).
+    keywords: [cybersecurity, security]
+  - text: >-
+      Dean's list, six consecutive semesters (demo).
+    keywords: []

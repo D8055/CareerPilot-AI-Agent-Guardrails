@@ -1,0 +1,17 @@
+# Local dev services. Phase 0 needs none of these; Phase 1+ uses Postgres,
+# Phase 2 uses Redis locally (prod queue is Postgres-backed — see spec §2.2).
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: careerpilot
+      POSTGRES_PASSWORD: careerpilot   # local dev only
+      POSTGRES_DB: careerpilot
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+volumes:
+  pgdata:
