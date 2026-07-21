@@ -103,11 +103,26 @@ class Application(Base):
 class Question(Base):
     __tablename__ = "questions"
     id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="keyword")  # keyword|form
     keyword: Mapped[str] = mapped_column(String(128), default="")
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(16), default="open")  # open|answered
     source_job: Mapped[int | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+
+
+class Answer(Base):
+    """The answer bank (ported policy): an unmatched form question is NEVER
+    auto-answered — it pings the owner once; the reply is stored here so the
+    same question is automatic forever after."""
+    __tablename__ = "answers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pattern: Mapped[str] = mapped_column(Text)        # regex (falls back to substring)
+    question: Mapped[str] = mapped_column(Text, default="")   # example question seen
+    answer: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(16), default="learned")  # learned|manual
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class IntelligenceJob(Base):
@@ -169,6 +184,7 @@ def make_engine(db_url: str | None = None):
 _MIGRATIONS = [
     ("career_items", "source", "ALTER TABLE career_items ADD COLUMN source VARCHAR(16) DEFAULT 'pool'"),
     ("jobs", "matched_keywords", "ALTER TABLE jobs ADD COLUMN matched_keywords JSON"),
+    ("questions", "kind", "ALTER TABLE questions ADD COLUMN kind VARCHAR(16) DEFAULT 'keyword'"),
 ]
 
 

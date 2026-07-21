@@ -112,6 +112,34 @@ export interface Question {
   answer?: string | null;
   status?: string;
   created_at?: string;
+  kind?: "keyword" | "form";
+}
+
+export interface AttentionItem {
+  type: "quality_failed" | "enrich_failed";
+  intelligence_id?: number | string;
+  job_id: number | string;
+  company: string;
+  detail: string;
+}
+
+export interface Attention {
+  counts: {
+    open_questions: number;
+    failed_items: number;
+    quality_pending: number;
+    runner_online: boolean;
+  };
+  items: AttentionItem[];
+}
+
+export interface AnswerEntry {
+  id: number | string;
+  pattern: string | null;
+  question: string | null;
+  answer: string;
+  source: "learned" | "manual";
+  uses: number;
 }
 
 export interface EvalRun {

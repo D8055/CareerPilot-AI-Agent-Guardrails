@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState, type FormEvent } from "react";
 import { api, apiDownload, apiUpload, isOwner } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
-import type { CareerItem, RagHit, ResumeMeta } from "@/lib/types";
+import type { AnswerEntry, CareerItem, RagHit, ResumeMeta } from "@/lib/types";
 import {
   EmptyState,
   ErrorNote,
@@ -43,6 +43,8 @@ export default function CareerPage() {
         <ResumePanel owner={owner} />
         {owner && <AddItemPanel onAdded={career.refetch} />}
       </div>
+
+      <AnswerBankPanel owner={owner} />
 
       <RagSearch />
 
@@ -237,6 +239,141 @@ function AddItemPanel({ onAdded }: { onAdded: () => void }) {
         </div>
       </form>
       {done && <p className="mt-2 text-sm text-green">Added to the record.</p>}
+      {error && <p className="mt-2 text-sm text-red">{error}</p>}
+    </section>
+  );
+}
+
+function AnswerBankPanel({ owner }: { owner: boolean }) {
+  const answers = useApi(useCallback(() => api<AnswerEntry[]>("/answers"), []));
+  const [form, setForm] = useState({ question: "", pattern: "", answer: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const body: Record<string, string> = { answer: form.answer };
+      if (form.question.trim()) body.question = form.question.trim();
+      if (form.pattern.trim()) body.pattern = form.pattern.trim();
+      await api("/answers", { method: "POST", body });
+      setForm({ question: "", pattern: "", answer: "" });
+      answers.refetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add the answer.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: number | string) {
+    try {
+      await api(`/answers/${id}`, { method: "DELETE" });
+      answers.refetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete it.");
+    }
+  }
+
+  const list = answers.data ?? [];
+  const canAdd =
+    form.answer.trim().length > 0 &&
+    (form.question.trim().length > 0 || form.pattern.trim().length > 0);
+
+  return (
+    <section className="panel p-5">
+      <Eyebrow>answer bank</Eyebrow>
+      <p className="mt-1 mb-3 text-xs text-dim">
+        Canonical answers to application form questions. Unmatched questions
+        always ask you first — replies are reused automatically.
+      </p>
+
+      {answers.loading ? (
+        <Loading label="Reading answers" />
+      ) : answers.error ? (
+        <ErrorNote message={answers.error} />
+      ) : list.length === 0 ? (
+        <p className="py-2 text-sm text-faint">
+          Nothing learned yet. Form questions you answer once are answered
+          automatically forever.
+        </p>
+      ) : (
+        <div className="divide-y divide-[var(--line)]">
+          {list.map((entry) => (
+            <div key={entry.id} className="flex items-start gap-3 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">
+                  {entry.question ?? (
+                    <span className="readout">{entry.pattern}</span>
+                  )}
+                </p>
+                <p className="mt-0.5 text-sm text-dim">↳ {entry.answer}</p>
+                {entry.question && entry.pattern && (
+                  <p className="readout mt-0.5 text-[0.65rem] text-faint">
+                    matches /{entry.pattern}/
+                  </p>
+                )}
+              </div>
+              <span className={entry.source === "learned" ? "chip chip-cyan" : "chip"}>
+                {entry.source}
+              </span>
+              <span
+                className="readout text-xs text-faint"
+                title={`Used ${entry.uses} time${entry.uses === 1 ? "" : "s"}`}
+              >
+                ×{entry.uses}
+              </span>
+              {owner && (
+                <button
+                  type="button"
+                  className="btn btn-quiet px-2 py-1 text-xs"
+                  title="Delete this answer"
+                  onClick={() => remove(entry.id)}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {owner && (
+        <form onSubmit={add} className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <input
+              className="input"
+              placeholder="Question, e.g. Are you willing to relocate?"
+              value={form.question}
+              onChange={(e) => setForm({ ...form, question: e.target.value })}
+            />
+            <input
+              className="input"
+              placeholder="optional regex, e.g. salary|compensation"
+              value={form.pattern}
+              onChange={(e) => setForm({ ...form, pattern: e.target.value })}
+            />
+          </div>
+          <div className="flex gap-2">
+            <input
+              className="input flex-1"
+              placeholder="Answer"
+              value={form.answer}
+              onChange={(e) => setForm({ ...form, answer: e.target.value })}
+              required
+            />
+            <button
+              type="submit"
+              className="btn btn-primary shrink-0"
+              disabled={busy || !canAdd}
+            >
+              {busy ? "Adding…" : "Add"}
+            </button>
+          </div>
+        </form>
+      )}
       {error && <p className="mt-2 text-sm text-red">{error}</p>}
     </section>
   );

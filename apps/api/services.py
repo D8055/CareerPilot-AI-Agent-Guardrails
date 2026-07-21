@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from careerpilot_shared import (build_pool_plan, check_honesty, extract_jd_terms,
                                 load_pool, match_score, validate_pool_plan)
 
-from db import (Blocker, CareerItem, EvalRun, IntelligenceJob, Job, Outbox, Plan,
-                Question, StatusEvent)
+from db import (Answer, Blocker, CareerItem, EvalRun, IntelligenceJob, Job,
+                Outbox, Plan, Question, RunnerInfo, StatusEvent, utcnow)
 from rag import cosine, get_embedder
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -247,6 +247,87 @@ def run_evals(db: Session) -> dict:
     db.add(run)
     db.commit()
     return {"id": run.id, "matrix_key": run.matrix_key, "metrics": metrics}
+
+
+# ---------- answer bank (ported): learn-on-ping, never auto-answer ----------
+
+def _norm_q(text: str) -> str:
+    import re
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def resolve_answer(db: Session, question_text: str) -> dict:
+    """Look a form question up in the bank. A hit bumps usage and returns
+    the stored answer. A miss creates ONE open form-question ping for the
+    owner (never auto-answered, never re-asked while one is open)."""
+    import re
+    norm = _norm_q(question_text)
+    for a in db.execute(select(Answer)).scalars():
+        try:
+            hit = re.search(a.pattern, question_text, re.I) is not None
+        except re.error:
+            hit = a.pattern.lower() in norm
+        if hit or _norm_q(a.question) == norm:
+            a.uses += 1
+            db.commit()
+            return {"answer": a.answer, "answer_id": a.id, "matched": True}
+    existing = [q for q in db.execute(
+        select(Question).filter_by(kind="form", status="open")).scalars()
+        if _norm_q(q.question) == norm]
+    if existing:
+        return {"answer": None, "matched": False, "question_id": existing[0].id,
+                "note": "already waiting on the owner"}
+    q = Question(kind="form", question=question_text)
+    db.add(q)
+    db.commit()
+    return {"answer": None, "matched": False, "question_id": q.id,
+            "note": "asked the owner; the reply will be reused automatically"}
+
+
+def learn_answer(db: Session, question_text: str, answer_text: str) -> Answer:
+    """Store a replied form question so it is automatic next time."""
+    import re
+    a = Answer(pattern=re.escape(_norm_q(question_text)),
+               question=question_text, answer=answer_text, source="learned")
+    db.add(a)
+    db.commit()
+    return a
+
+
+# ---------- attention: everything that needs a human, in one place ----------
+
+def attention(db: Session) -> dict:
+    items = []
+    for ij in db.execute(select(IntelligenceJob).filter_by(status="failed")).scalars():
+        r = ij.result or {}
+        if r.get("dismissed") or r.get("superseded"):
+            continue
+        job = db.get(Job, (ij.payload or {}).get("job_id", -1))
+        detail = (r.get("error") or "; ".join(r.get("rejected_by_honesty_guard", []))
+                  or "failed")
+        items.append({"type": "quality_failed", "intelligence_id": ij.id,
+                      "job_id": job.id if job else None,
+                      "company": job.company if job else "",
+                      "detail": detail})
+    for job in db.execute(select(Job)).scalars():
+        if job.jd_text or not job.url:
+            continue
+        events = db.execute(select(StatusEvent).filter_by(job_id=job.id)
+                            .order_by(StatusEvent.ts.desc())).scalars().all()
+        note = next((e.note for e in events if "auto-enrich failed" in e.note), None)
+        if note:
+            items.append({"type": "enrich_failed", "job_id": job.id,
+                          "company": job.company or job.url, "detail": note})
+    runners_online = sum(
+        1 for r in db.execute(select(RunnerInfo)).scalars()
+        if (utcnow() - r.last_heartbeat).total_seconds() < 120)
+    counts = {
+        "open_questions": db.query(Question).filter_by(status="open").count(),
+        "failed_items": len(items),
+        "quality_pending": db.query(IntelligenceJob).filter_by(status="queued").count(),
+        "runner_online": runners_online > 0,
+    }
+    return {"counts": counts, "items": items}
 
 
 # ---------- blockers: the waiting-on-Dhiren state ----------

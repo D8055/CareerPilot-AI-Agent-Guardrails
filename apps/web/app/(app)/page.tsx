@@ -1,16 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState, type FormEvent } from "react";
-import { api, isOwner } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { api, apiDownload, isOwner } from "@/lib/api";
 import { useApi, useLive } from "@/lib/hooks";
-import type { Job, Question, Runner, Stats } from "@/lib/types";
+import type {
+  Attention,
+  AttentionItem,
+  Job,
+  Question,
+  Runner,
+  Stats,
+} from "@/lib/types";
 import {
   EmptyState,
   ErrorNote,
   Eyebrow,
   Loading,
   MatchGauge,
+  StatusChip,
   fmtWhen,
 } from "@/components/ui";
 
@@ -30,14 +39,26 @@ export default function Dashboard() {
   const stats = useApi(useCallback(() => api<Stats>("/stats"), []));
   const runners = useApi(useCallback(() => api<Runner[]>("/status/runners"), []));
   const questions = useApi(useCallback(() => api<Question[]>("/questions"), []));
+  const attention = useApi(useCallback(() => api<Attention>("/attention"), []));
 
   const refreshAll = useCallback(() => {
     jobs.refetch();
     stats.refetch();
     runners.refetch();
     questions.refetch();
+    attention.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobs.refetch, stats.refetch, runners.refetch, questions.refetch]);
+  }, [jobs.refetch, stats.refetch, runners.refetch, questions.refetch, attention.refetch]);
+
+  // Board | Table — persisted per browser; read after mount so SSR matches.
+  const [view, setView] = useState<"board" | "table">("board");
+  useEffect(() => {
+    if (localStorage.getItem("cp_pipeline_view") === "table") setView("table");
+  }, []);
+  const pickView = useCallback((v: "board" | "table") => {
+    setView(v);
+    localStorage.setItem("cp_pipeline_view", v);
+  }, []);
 
   const wsOpen = useLive(refreshAll);
 
@@ -104,9 +125,13 @@ export default function Dashboard() {
 
       {/* ---- pipeline board ---- */}
       <section aria-label="Pipeline board" className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center gap-2">
           <h1 className="display text-lg font-semibold">Pipeline</h1>
-          {owner && <AddJob onAdded={refreshAll} />}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <ViewToggle view={view} onChange={pickView} />
+            <ExportCsv />
+            {owner && <AddJob onAdded={refreshAll} />}
+          </div>
         </div>
 
         {jobs.loading ? (
@@ -116,6 +141,8 @@ export default function Dashboard() {
             No jobs on the board yet. Add one above, or push one through the
             API or a connected MCP client.
           </EmptyState>
+        ) : view === "table" ? (
+          <JobsTable jobs={jobs.data ?? []} />
         ) : (
           <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6">
             <div className="flex min-w-max gap-3">
@@ -147,6 +174,13 @@ export default function Dashboard() {
         )}
       </section>
 
+      {/* ---- items that need a human ---- */}
+      <AttentionPanel
+        items={attention.data?.items ?? []}
+        owner={owner}
+        onChanged={refreshAll}
+      />
+
       {/* ---- open questions ---- */}
       <QuestionsPanel
         questions={questions.data}
@@ -165,6 +199,310 @@ function Readout({ label, value }: { label: string; value: number | undefined })
       <span className="readout text-2xl font-semibold leading-tight">
         {value ?? "–"}
       </span>
+    </div>
+  );
+}
+
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: "board" | "table";
+  onChange: (v: "board" | "table") => void;
+}) {
+  return (
+    <div
+      className="readout flex items-center gap-0.5 rounded-lg border border-line bg-panel p-0.5 text-[0.7rem]"
+      role="group"
+      aria-label="Pipeline view"
+    >
+      {(["board", "table"] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          aria-pressed={view === v}
+          onClick={() => onChange(v)}
+          className={`rounded-md px-2.5 py-1 font-semibold uppercase tracking-wide transition-colors ${
+            view === v ? "bg-panel2 text-ink" : "text-faint hover:text-ink"
+          }`}
+        >
+          {v}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ExportCsv() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <button
+        type="button"
+        className="btn"
+        disabled={busy}
+        title={error ?? "Download every job as CSV"}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            await apiDownload("/export/jobs.csv", "careerpilot_jobs.csv");
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Export failed.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Exporting…" : "Export CSV"}
+      </button>
+      {error && <span className="text-xs text-red">{error}</span>}
+    </>
+  );
+}
+
+/* ---- table view ---- */
+
+type SortKey = "company" | "role" | "status" | "match" | "channel" | "added_at";
+
+const TABLE_COLS: { key: SortKey; label: string }[] = [
+  { key: "company", label: "Company" },
+  { key: "role", label: "Role" },
+  { key: "status", label: "Status" },
+  { key: "match", label: "Match" },
+  { key: "channel", label: "Channel" },
+  { key: "added_at", label: "Added" },
+];
+
+function compareJobs(a: Job, b: Job, key: SortKey): number {
+  if (key === "match") return (a.match ?? -1) - (b.match ?? -1);
+  const av = String(a[key] ?? "").toLowerCase();
+  const bv = String(b[key] ?? "").toLowerCase();
+  return av.localeCompare(bv);
+}
+
+function JobsTable({ jobs }: { jobs: Job[] }) {
+  const router = useRouter();
+  const [sortKey, setSortKey] = useState<SortKey>("added_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function clickHeader(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "match" || key === "added_at" ? "desc" : "asc");
+    }
+  }
+
+  const sorted = [...jobs].sort((a, b) => {
+    const c = compareJobs(a, b, sortKey);
+    return sortDir === "asc" ? c : -c;
+  });
+
+  return (
+    <div className="panel overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-line">
+            {TABLE_COLS.map((col) => (
+              <th
+                key={col.key}
+                className="px-4 py-2.5 text-left"
+                aria-sort={
+                  sortKey === col.key
+                    ? sortDir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : undefined
+                }
+              >
+                <button
+                  type="button"
+                  className="eyebrow cursor-pointer transition-colors hover:!text-[var(--ink)]"
+                  onClick={() => clickHeader(col.key)}
+                >
+                  {col.label}
+                  {sortKey === col.key && (sortDir === "asc" ? " ▲" : " ▼")}
+                </button>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[var(--line)]">
+          {sorted.map((job) => (
+            <tr
+              key={job.id}
+              className="cursor-pointer transition-colors hover:bg-panel2"
+              onClick={() => router.push(`/jobs/${job.id}`)}
+            >
+              <td className="px-4 py-2.5 font-semibold">
+                <Link
+                  href={`/jobs/${job.id}`}
+                  className="hover:text-accent"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {job.company}
+                </Link>
+              </td>
+              <td className="px-4 py-2.5 text-dim">{job.role}</td>
+              <td className="px-4 py-2.5">
+                <StatusChip status={job.status} />
+              </td>
+              <td className="px-4 py-2.5">
+                <MatchGauge score={job.match} size={32} />
+              </td>
+              <td className="px-4 py-2.5">
+                {job.channel ? (
+                  <span className="chip">{job.channel}</span>
+                ) : (
+                  <span className="text-faint">—</span>
+                )}
+              </td>
+              <td className="readout px-4 py-2.5 text-xs text-faint">
+                {fmtWhen(job.added_at)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ---- attention: failed passes & fetches that need a human ---- */
+
+function AttentionPanel({
+  items,
+  owner,
+  onChanged,
+}: {
+  items: AttentionItem[];
+  owner: boolean;
+  onChanged: () => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <section aria-label="Attention" className="flex flex-col gap-3">
+      <h2 className="display text-lg font-semibold">Attention</h2>
+      <div className="flex flex-col gap-2">
+        {items.map((item, i) => (
+          <AttentionRow
+            key={`${item.type}-${item.intelligence_id ?? item.job_id}-${i}`}
+            item={item}
+            owner={owner}
+            onChanged={onChanged}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AttentionRow({
+  item,
+  owner,
+  onChanged,
+}: {
+  item: AttentionItem;
+  owner: boolean;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(label: string, fn: () => Promise<void>) {
+    setBusy(label);
+    setError(null);
+    setNote(null);
+    try {
+      await fn();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="panel border-[color-mix(in_srgb,var(--amber)_45%,transparent)] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-sm font-semibold">{item.company}</span>
+            <span className="chip chip-amber">
+              {item.type === "quality_failed" ? "quality pass failed" : "fetch failed"}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-dim">{item.detail}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {item.type === "enrich_failed" && (
+            <>
+              {owner && (
+                <button
+                  type="button"
+                  className="btn px-2.5 py-1 text-xs"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    run("retry", async () => {
+                      const res = await api<{ enrichment?: string }>(
+                        `/jobs/${item.job_id}/enrich`,
+                        { method: "POST" }
+                      );
+                      if (res.enrichment && res.enrichment.includes("failed")) {
+                        setNote(res.enrichment);
+                      }
+                    })
+                  }
+                >
+                  {busy === "retry" ? "Fetching…" : "Retry fetch"}
+                </button>
+              )}
+              <Link href={`/jobs/${item.job_id}`} className="btn btn-quiet px-2.5 py-1 text-xs">
+                Open job
+              </Link>
+            </>
+          )}
+          {item.type === "quality_failed" && owner && (
+            <>
+              <button
+                type="button"
+                className="btn px-2.5 py-1 text-xs"
+                disabled={busy !== null || item.intelligence_id == null}
+                onClick={() =>
+                  run("retry", async () => {
+                    await api(`/intelligence/${item.intelligence_id}/retry`, {
+                      method: "POST",
+                    });
+                  })
+                }
+              >
+                {busy === "retry" ? "Queuing…" : "Retry pass"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-quiet px-2.5 py-1 text-xs"
+                disabled={busy !== null || item.intelligence_id == null}
+                onClick={() =>
+                  run("dismiss", async () => {
+                    await api(`/intelligence/${item.intelligence_id}/dismiss`, {
+                      method: "POST",
+                    });
+                  })
+                }
+              >
+                {busy === "dismiss" ? "Dismissing…" : "Dismiss"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {note && <p className="mt-1.5 text-sm text-amber">{note}</p>}
+      {error && <p className="mt-1.5 text-sm text-red">{error}</p>}
     </div>
   );
 }

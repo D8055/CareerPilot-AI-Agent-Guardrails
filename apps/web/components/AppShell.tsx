@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
-import { clearSession, getRole, getToken } from "@/lib/api";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { api, clearSession, getRole, getToken } from "@/lib/api";
+import type { Attention } from "@/lib/types";
 import { ThemeToggle } from "./ThemeToggle";
 
 const emptySubscribe = () => () => {};
@@ -34,6 +35,63 @@ export function Wordmark() {
         Career<span className="text-accent">Pilot</span>
       </span>
     </span>
+  );
+}
+
+/**
+ * Slim caution strip under the header — only rendered when something needs a
+ * human: open questions, failed passes/fetches, or the runner being offline.
+ * Amber is the "needs Dhiren" color everywhere else; same meaning here.
+ */
+function NeedsYouBar() {
+  const [attention, setAttention] = useState<Attention | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      try {
+        const data = await api<Attention>("/attention");
+        if (!disposed) setAttention(data);
+      } catch {
+        if (!disposed) setAttention(null); // API trouble is surfaced elsewhere
+      }
+    };
+    void load();
+    const poll = setInterval(load, 30000);
+    return () => {
+      disposed = true;
+      clearInterval(poll);
+    };
+  }, []);
+
+  const c = attention?.counts;
+  const needs =
+    !!c && (c.open_questions > 0 || c.failed_items > 0 || !c.runner_online);
+  if (!needs) return null;
+
+  return (
+    <div
+      className="readout -mx-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-[color-mix(in_srgb,var(--amber)_35%,transparent)] bg-[color-mix(in_srgb,var(--amber)_9%,transparent)] px-4 py-1.5 text-[0.7rem] text-amber sm:-mx-6 sm:px-6"
+      role="status"
+      aria-label="Needs your attention"
+    >
+      <span className="eyebrow !text-amber">needs you</span>
+      {c.open_questions > 0 && (
+        <Link href="/" className="underline-offset-2 hover:underline">
+          {c.open_questions} question{c.open_questions === 1 ? "" : "s"}
+        </Link>
+      )}
+      {c.failed_items > 0 && (
+        <Link href="/" className="underline-offset-2 hover:underline">
+          {c.failed_items} failed
+        </Link>
+      )}
+      {!c.runner_online && (
+        <Link href="/settings" className="underline-offset-2 hover:underline">
+          quality passes paused
+        </Link>
+      )}
+    </div>
   );
 }
 
@@ -94,6 +152,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
+      <NeedsYouBar />
       <main className="flex-1 py-6">{children}</main>
       <footer className="border-t border-line py-4">
         <div className="readout flex items-center justify-between text-[0.65rem] text-faint">

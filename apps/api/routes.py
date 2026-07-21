@@ -329,8 +329,9 @@ def rag(body: RagBody, user: dict = Depends(current_user),
 
 @router.get("/questions")
 def questions(user: dict = Depends(current_user), db: Session = Depends(get_db)):
-    return [{"id": q.id, "keyword": q.keyword, "question": q.question,
-             "answer": q.answer, "status": q.status, "source_job": q.source_job}
+    return [{"id": q.id, "kind": q.kind, "keyword": q.keyword,
+             "question": q.question, "answer": q.answer, "status": q.status,
+             "source_job": q.source_job}
             for q in db.execute(select(Question)).scalars()]
 
 
@@ -351,6 +352,10 @@ async def answer_question(qid: int, body: AnswerBody,
     q.answer = body.answer
     q.status = "answered"
     answer = body.answer.strip()
+    if q.kind == "form":
+        # form questions feed the answer bank verbatim — automatic next time
+        a = services.learn_answer(db, q.question, answer)
+        return {"id": q.id, "status": q.status, "learned_answer_id": a.id}
     confirmed = answer and answer.lower() not in ("no", "no.", "n", "none", "nope")
     result: dict = {"id": q.id, "status": q.status, "confirmed": bool(confirmed)}
     if confirmed:
@@ -367,6 +372,118 @@ async def answer_question(qid: int, body: AnswerBody,
                                      "match": report["match_score"]})
     db.commit()
     return result
+
+
+# ---------- answer bank ----------
+
+@router.get("/answers")
+def list_answers(user: dict = Depends(current_user), db: Session = Depends(get_db)):
+    from db import Answer
+    return [{"id": a.id, "pattern": a.pattern, "question": a.question,
+             "answer": a.answer, "source": a.source, "uses": a.uses}
+            for a in db.execute(select(Answer)).scalars()]
+
+
+class AnswerEntryBody(BaseModel):
+    question: str = ""
+    pattern: str = ""
+    answer: str
+
+
+@router.post("/answers", status_code=201)
+def add_answer(body: AnswerEntryBody, user: dict = Depends(require_owner),
+               db: Session = Depends(get_db)):
+    from db import Answer
+    if not body.answer.strip() or not (body.question.strip() or body.pattern.strip()):
+        raise HTTPException(400, "need an answer plus a question or pattern")
+    import re
+    a = Answer(pattern=body.pattern.strip() or re.escape(body.question.strip().lower()),
+               question=body.question.strip(), answer=body.answer.strip(),
+               source="manual")
+    db.add(a)
+    db.commit()
+    return {"id": a.id, "pattern": a.pattern, "answer": a.answer}
+
+
+@router.delete("/answers/{aid}")
+def delete_answer(aid: int, user: dict = Depends(require_owner),
+                  db: Session = Depends(get_db)):
+    from db import Answer
+    a = db.get(Answer, aid)
+    if not a:
+        raise HTTPException(404, "no such answer")
+    db.delete(a)
+    db.commit()
+    return {"ok": True}
+
+
+class ResolveBody(BaseModel):
+    question: str
+
+
+@router.post("/answers/resolve")
+def resolve_answer(body: ResolveBody, user: dict = Depends(current_user),
+                   db: Session = Depends(get_db)):
+    """Bank hit -> the stored answer. Miss -> pings the owner (policy: an
+    unmatched question is NEVER auto-answered)."""
+    if not body.question.strip():
+        raise HTTPException(400, "question is empty")
+    return services.resolve_answer(db, body.question)
+
+
+# ---------- attention ----------
+
+@router.get("/attention")
+def attention(user: dict = Depends(current_user), db: Session = Depends(get_db)):
+    return services.attention(db)
+
+
+@router.post("/intelligence/{iid}/retry")
+async def retry_intelligence(iid: int, user: dict = Depends(require_owner),
+                             db: Session = Depends(get_db)):
+    job = db.get(IntelligenceJob, iid)
+    if not job:
+        raise HTTPException(404, "no such intelligence job")
+    if job.status != "failed":
+        raise HTTPException(400, f"only failed jobs can retry (status: {job.status})")
+    job.status = "queued"
+    job.result = None
+    job.runner_id = ""
+    job.lease_ts = None
+    db.commit()
+    await manager.broadcast({"type": "quality_pass", "intelligence_id": iid,
+                             "status": "queued"})
+    return {"id": iid, "status": "queued"}
+
+
+@router.post("/intelligence/{iid}/dismiss")
+def dismiss_intelligence(iid: int, user: dict = Depends(require_owner),
+                         db: Session = Depends(get_db)):
+    job = db.get(IntelligenceJob, iid)
+    if not job:
+        raise HTTPException(404, "no such intelligence job")
+    job.result = {**(job.result or {}), "dismissed": True}
+    db.commit()
+    return {"id": iid, "dismissed": True}
+
+
+# ---------- export ----------
+
+@router.get("/export/jobs.csv")
+def export_jobs(user: dict = Depends(current_user), db: Session = Depends(get_db)):
+    import csv
+    import io
+
+    from fastapi.responses import Response
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["id", "company", "role", "status", "match", "channel", "ats",
+                "added_at", "url"])
+    for j in db.execute(select(Job).order_by(Job.id)).scalars():
+        w.writerow([j.id, j.company, j.role, j.status, j.match, j.channel,
+                    j.ats, j.added_at.isoformat() if j.added_at else "", j.url])
+    return Response(content=buf.getvalue(), media_type="text/csv", headers={
+        "Content-Disposition": 'attachment; filename="careerpilot_jobs.csv"'})
 
 
 # ---------- evals ----------
