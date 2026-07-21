@@ -210,6 +210,44 @@ def tailored_resume(job_id: int, user: dict = Depends(current_user),
             "quality_pass": plan.quality_pass, "resume": resume}
 
 
+@router.get("/jobs/{job_id}/resume/status")
+def resume_pdf_status(job_id: int, user: dict = Depends(current_user),
+                      db: Session = Depends(get_db)):
+    return services.resume_pdf_status(db, job_id)
+
+
+@router.post("/jobs/{job_id}/resume/render")
+async def render_resume(job_id: int, user: dict = Depends(require_owner),
+                        db: Session = Depends(get_db)):
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "no such job")
+    try:
+        result = services.render_resume_pdf(db, job)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    await manager.broadcast({"type": "resume_rendered", "job_id": job_id,
+                             "verified": result["verified"]})
+    return result
+
+
+@router.get("/jobs/{job_id}/resume.pdf")
+def resume_pdf(job_id: int, user: dict = Depends(current_user),
+               db: Session = Depends(get_db)):
+    """The tailored PDF, served inline so it renders in an <iframe> / new tab.
+    Auth rides the fetch (the frontend turns the blob into an object URL — no
+    token ever appears in a URL)."""
+    from fastapi.responses import Response
+
+    from db import Artifact
+    art = db.execute(select(Artifact).filter_by(kind="resume_pdf", job_id=job_id)
+                     .order_by(Artifact.ts.desc())).scalars().first()
+    if not art:
+        raise HTTPException(404, "no rendered PDF — render it first")
+    return Response(content=art.data, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="{art.filename}"'})
+
+
 @router.get("/jobs/{job_id}/plan")
 def latest_plan(job_id: int, user: dict = Depends(current_user),
                 db: Session = Depends(get_db)):

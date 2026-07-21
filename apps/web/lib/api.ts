@@ -142,3 +142,14 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/** Fetch a binary resource with auth and return a blob: object URL. The caller
+ * owns the URL and must URL.revokeObjectURL() it. No token ever hits a URL. */
+export async function apiBlobUrl(path: string): Promise<string> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_URL}${path}`, { headers });
+  if (!res.ok) throw new ApiError(`Load failed (${res.status})`, res.status);
+  return URL.createObjectURL(await res.blob());
+}

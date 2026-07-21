@@ -95,6 +95,16 @@ export interface TailoredResume {
   };
 }
 
+export interface ResumePdfStatus {
+  rendering_available: boolean;
+  has_plan: boolean;
+  rendered: boolean;
+  verified: boolean;
+  failures: string[];
+  stale: boolean;
+  ts: string | null;
+}
+
 export interface ResumeMeta {
   uploaded: boolean;
   id?: number;

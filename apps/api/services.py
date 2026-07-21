@@ -176,6 +176,63 @@ def tailor_and_store(db: Session, job: Job) -> dict:
             "target_match": target_match()}
 
 
+def render_resume_pdf(db: Session, job: Job) -> dict:
+    """Render the job's latest plan into a clone-of-master PDF and cache it as
+    an artifact. Requires an uploaded master resume and a Windows+Word host."""
+    import tempfile
+    from pathlib import Path
+
+    import rendering
+    from db import Artifact
+
+    if not rendering.render_available():
+        raise RuntimeError("PDF rendering needs Windows + Microsoft Word; not "
+                           "available on this host (it becomes the runner's job).")
+    master = db.execute(select(Artifact).filter_by(kind="master_resume")
+                        .order_by(Artifact.ts.desc())).scalars().first()
+    if not master:
+        raise RuntimeError("upload your master resume first (Career page).")
+    plan = db.execute(select(Plan).filter_by(job_id=job.id)
+                      .order_by(Plan.created_at.desc())).scalars().first()
+    if not plan:
+        raise RuntimeError("tailor this job first — no plan to render.")
+
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        master_path = work / "master.docx"
+        master_path.write_bytes(master.data)
+        pdf_bytes, failures = rendering.render_job_pdf(
+            master_path, get_pool(), plan.plan_json, work)
+
+    db.query(Artifact).filter_by(kind="resume_pdf", job_id=job.id).delete()
+    art = Artifact(kind="resume_pdf", job_id=job.id, plan_id=plan.id,
+                   filename=f"{job.company or 'resume'}_tailored.pdf".replace(" ", "_"),
+                   content_type="application/pdf", data=pdf_bytes,
+                   meta={"failures": failures})
+    db.add(art)
+    db.commit()
+    return {"rendered": True, "plan_id": plan.id, "verified": not failures,
+            "failures": failures, "size": len(pdf_bytes)}
+
+
+def resume_pdf_status(db: Session, job_id: int) -> dict:
+    import rendering
+    from db import Artifact
+    latest_plan = db.execute(select(Plan).filter_by(job_id=job_id)
+                             .order_by(Plan.created_at.desc())).scalars().first()
+    art = db.execute(select(Artifact).filter_by(kind="resume_pdf", job_id=job_id)
+                     .order_by(Artifact.ts.desc())).scalars().first()
+    return {
+        "rendering_available": rendering.render_available(),
+        "has_plan": latest_plan is not None,
+        "rendered": art is not None,
+        "verified": bool(art and not (art.meta or {}).get("failures")),
+        "failures": (art.meta or {}).get("failures", []) if art else [],
+        "stale": bool(art and latest_plan and art.plan_id != latest_plan.id),
+        "ts": art.ts.isoformat() if art else None,
+    }
+
+
 def _desc(text: str) -> str:
     """The resume rules: descriptions render hyphen-free (dates keep theirs)."""
     return " ".join(text.replace("-", " ").split())

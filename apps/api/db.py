@@ -68,15 +68,18 @@ class CareerItem(Base):
 
 
 class Artifact(Base):
-    """Uploaded files (resumes). Bytes live in the DB — local dev DB is
-    gitignored, and deployed hosts have ephemeral filesystems (spec §7.2)."""
+    """Uploaded + generated files (master resume, tailored resume PDFs). Bytes
+    live in the DB — local dev DB is gitignored, and deployed hosts have
+    ephemeral filesystems (spec §7.2)."""
     __tablename__ = "artifacts"
     id: Mapped[int] = mapped_column(primary_key=True)
     job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
-    kind: Mapped[str] = mapped_column(String(32), default="master_resume")
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(32), default="master_resume")  # master_resume|resume_pdf
     filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(128), default="application/octet-stream")
     data: Mapped[bytes] = mapped_column(LargeBinary)
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {failures: [...]}
     ts: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -185,6 +188,8 @@ _MIGRATIONS = [
     ("career_items", "source", "ALTER TABLE career_items ADD COLUMN source VARCHAR(16) DEFAULT 'pool'"),
     ("jobs", "matched_keywords", "ALTER TABLE jobs ADD COLUMN matched_keywords JSON"),
     ("questions", "kind", "ALTER TABLE questions ADD COLUMN kind VARCHAR(16) DEFAULT 'keyword'"),
+    ("artifacts", "plan_id", "ALTER TABLE artifacts ADD COLUMN plan_id INTEGER"),
+    ("artifacts", "meta", "ALTER TABLE artifacts ADD COLUMN meta JSON"),
 ]
 
 

@@ -2,12 +2,13 @@
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, isOwner } from "@/lib/api";
+import { api, apiBlobUrl, apiDownload, isOwner } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import type {
   JobDetail,
   PlanFull,
   PlanMeta,
+  ResumePdfStatus,
   TailoredResume,
   TailorResult,
 } from "@/lib/types";
@@ -385,38 +386,174 @@ function TailorPanel({
 }
 
 function ResumeView({ id, planStamp }: { id: string; planStamp: number | string }) {
-  const [data, setData] = useState<TailoredResume | null>(null);
+  const owner = isOwner();
+  const [status, setStatus] = useState<ResumePdfStatus | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const loadStatus = useCallback(async () => {
+    try {
+      const st = await api<ResumePdfStatus>(`/jobs/${id}/resume/status`);
+      setStatus(st);
+      return st;
+    } catch {
+      setStatus(null);
+      return null;
+    }
+  }, [id]);
+
+  // load status, then the PDF blob if one exists
+  useEffect(() => {
+    let url: string | null = null;
+    let cancelled = false;
+    (async () => {
+      const st = await loadStatus();
+      if (cancelled || !st?.rendered) return;
+      try {
+        url = await apiBlobUrl(`/jobs/${id}/resume.pdf`);
+        if (!cancelled) setPdfUrl(url);
+        else if (url) URL.revokeObjectURL(url);
+      } catch {
+        /* status will still show the render/regenerate controls */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [id, planStamp, loadStatus]);
+
+  async function render() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/jobs/${id}/resume/render`, { method: "POST" });
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      setPdfUrl(null);
+      const st = await loadStatus();
+      if (st?.rendered) setPdfUrl(await apiBlobUrl(`/jobs/${id}/resume.pdf`));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Rendering failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!status) return null;
+  const filename = `${id}_tailored_resume.pdf`;
+
+  return (
+    <section className="panel p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="display text-base font-semibold">Tailored resume</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {status.rendered && !status.verified && (
+            <span className="chip chip-amber text-[0.65rem]">render unverified</span>
+          )}
+          {status.stale && (
+            <span className="chip chip-amber text-[0.65rem]">plan changed</span>
+          )}
+          {pdfUrl && (
+            <>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => window.open(pdfUrl, "_blank", "noopener")}
+              >
+                Open in new tab
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => apiDownload(`/jobs/${id}/resume.pdf`, filename)}
+              >
+                Download PDF
+              </button>
+            </>
+          )}
+          {owner && status.rendering_available && status.has_plan && (
+            <button
+              type="button"
+              className={pdfUrl ? "btn" : "btn btn-primary"}
+              disabled={busy}
+              onClick={render}
+            >
+              {busy
+                ? "Rendering…"
+                : pdfUrl
+                  ? status.stale
+                    ? "Regenerate"
+                    : "Re-render"
+                  : "Generate PDF"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {error && <p className="mb-2 text-sm text-red">{error}</p>}
+
+      {pdfUrl ? (
+        <object
+          data={pdfUrl}
+          type="application/pdf"
+          className="h-[85vh] w-full rounded-lg border border-[var(--line)] bg-white"
+          aria-label="Tailored resume PDF"
+        >
+          <p className="p-4 text-sm text-dim">
+            Your browser can’t embed PDFs.{" "}
+            <button type="button" className="underline" onClick={() => window.open(pdfUrl, "_blank")}>
+              Open it in a new tab
+            </button>
+            .
+          </p>
+        </object>
+      ) : !status.rendering_available ? (
+        <ResumeContentFallback id={id} planStamp={planStamp} />
+      ) : status.has_plan ? (
+        <p className="text-sm text-faint">
+          {owner
+            ? "Generate the PDF to see the tailored resume in your master’s exact format."
+            : "No tailored PDF has been generated yet."}
+        </p>
+      ) : (
+        <p className="text-sm text-faint">Tailor this job first.</p>
+      )}
+    </section>
+  );
+}
+
+/** Structured-content preview — only used where Word rendering is unavailable
+ * (e.g. a Linux deploy before the runner renders). On this Windows host the
+ * real clone-of-master PDF is shown instead. */
+function ResumeContentFallback({
+  id,
+  planStamp,
+}: {
+  id: string;
+  planStamp: number | string;
+}) {
+  const [data, setData] = useState<TailoredResume | null>(null);
   useEffect(() => {
     let cancelled = false;
     api<TailoredResume>(`/jobs/${id}/resume`)
-      .then((r) => {
-        if (!cancelled) setData(r);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "failed");
-      });
+      .then((r) => !cancelled && setData(r))
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [id, planStamp]);
 
-  if (error) return null;
   if (!data) return null;
   const r = data.resume;
   const contactLine = [r.contact.location, r.contact.phone, r.contact.email,
     r.contact.linkedin].filter(Boolean).join("  ·  ");
 
   return (
-    <section className="panel p-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="display text-base font-semibold">Tailored resume</h2>
-        <span className="readout text-[0.65rem] text-faint">
-          content preview · docx rendering arrives with the runner
-        </span>
-      </div>
-      {/* deliberately paper-colored in both themes — it is a document */}
+    <>
+      <p className="mb-2 readout text-[0.65rem] text-faint">
+        content preview — PDF rendering runs on the Windows host / runner
+      </p>
       <div className="rounded-lg border border-[var(--line)] bg-white px-8 py-7 font-serif text-[0.85rem] leading-relaxed text-neutral-900 shadow-sm">
         <div className="text-center">
           <div className="text-lg font-bold tracking-wide">{r.contact.name}</div>
@@ -475,7 +612,7 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
           </>
         )}
       </div>
-    </section>
+    </>
   );
 }
 
