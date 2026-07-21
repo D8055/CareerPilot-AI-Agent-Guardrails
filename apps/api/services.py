@@ -14,12 +14,31 @@ from db import (Blocker, CareerItem, EvalRun, IntelligenceJob, Job, Outbox, Plan
 from rag import cosine, get_embedder
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_POOL = REPO_ROOT / "data" / "demo_career_pool.yaml"
-EVAL_SET = REPO_ROOT / "data" / "eval_retrieval.yaml"
+DEMO_POOL = REPO_ROOT / "data" / "demo_career_pool.yaml"
+PRIVATE_POOL = REPO_ROOT / "data" / "private" / "career_pool.yaml"
+DEMO_EVAL_SET = REPO_ROOT / "data" / "eval_retrieval.yaml"
+PRIVATE_EVAL_SET = REPO_ROOT / "data" / "private" / "eval_retrieval.yaml"
+
+
+def pool_path() -> Path:
+    """Resolution order: explicit env -> private real pool (gitignored,
+    never committed) -> the fictional demo seed. Dropping a real pool file
+    into data/private/ is all it takes to go live with real data."""
+    env = os.environ.get("CAREERPILOT_POOL")
+    if env:
+        return Path(env)
+    return PRIVATE_POOL if PRIVATE_POOL.exists() else DEMO_POOL
+
+
+def eval_set_path() -> Path:
+    env = os.environ.get("CAREERPILOT_EVAL_SET")
+    if env:
+        return Path(env)
+    return PRIVATE_EVAL_SET if PRIVATE_EVAL_SET.exists() else DEMO_EVAL_SET
 
 
 def get_pool() -> dict:
-    return load_pool(os.environ.get("CAREERPILOT_POOL", DEFAULT_POOL))
+    return load_pool(pool_path())
 
 
 # ---------- ETL: career pool -> career_items (the RAG index) ----------
@@ -200,8 +219,8 @@ def run_evals(db: Session) -> dict:
     metrics: dict = {"embedder": get_embedder().name}
 
     hits = total = 0
-    if EVAL_SET.exists():
-        with open(EVAL_SET, encoding="utf-8") as f:
+    if eval_set_path().exists():
+        with open(eval_set_path(), encoding="utf-8") as f:
             pairs = yaml.safe_load(f)["pairs"]
         for p in pairs:
             total += 1
@@ -211,11 +230,18 @@ def run_evals(db: Session) -> dict:
     metrics["retrieval_pairs"] = total
     metrics["retrieval_recall_at_5"] = round(hits / total, 3) if total else None
 
-    # honesty: the fallback summary and every stored plan summary must be clean
-    violations = len(check_honesty(pool["meta"]["fallback_summary"], pool))
-    for plan in db.execute(select(Plan)).scalars():
-        violations += len(check_honesty(plan.plan_json.get("summary_text", ""), pool))
+    # honesty: the fallback summary and each job's LATEST plan (the one that
+    # ships) must be clean; superseded history may predate a pool change
+    extra = owner_corpus(db)
+    violations = len(check_honesty(pool["meta"]["fallback_summary"], pool, extra))
+    latest: dict[int, Plan] = {}
+    for plan in db.execute(select(Plan).order_by(Plan.created_at)).scalars():
+        latest[plan.job_id] = plan
+    for plan in latest.values():
+        violations += len(check_honesty(plan.plan_json.get("summary_text", ""),
+                                        pool, extra))
     metrics["honesty_violations"] = violations
+    metrics["plans_checked"] = len(latest)
 
     run = EvalRun(matrix_key=f"deterministic|{get_embedder().name}", metrics=metrics)
     db.add(run)

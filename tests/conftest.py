@@ -10,6 +10,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 
 os.environ.setdefault("CAREERPILOT_OWNER_PASSWORD", "test-password")
+# tests ALWAYS run against the fictional demo seed, even on a machine where
+# a real private pool exists (data/private/ is auto-preferred otherwise)
+os.environ["CAREERPILOT_POOL"] = str(REPO_ROOT / "data" / "demo_career_pool.yaml")
+os.environ["CAREERPILOT_EVAL_SET"] = str(REPO_ROOT / "data" / "eval_retrieval.yaml")
 os.environ.setdefault("CAREERPILOT_JWT_SECRET", "test-secret-0123456789abcdef0123456789abcdef")
 
 
