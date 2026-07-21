@@ -145,12 +145,13 @@ export default function Dashboard() {
           <JobsTable jobs={jobs.data ?? []} />
         ) : (
           <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6">
-            <div className="flex min-w-max gap-3">
+            {/* columns grow to share the full width; scroll only when cramped */}
+            <div className="flex gap-3">
               {allColumns.map((col) => {
                 const items = byColumn[col] ?? [];
                 if (items.length === 0 && !COLUMNS.includes(col)) return null;
                 return (
-                  <div key={col} className="w-60 shrink-0">
+                  <div key={col} className="min-w-[12rem] flex-1">
                     <div className="mb-2 flex items-baseline justify-between px-1">
                       <Eyebrow>{col}</Eyebrow>
                       <span className="readout text-xs text-faint">

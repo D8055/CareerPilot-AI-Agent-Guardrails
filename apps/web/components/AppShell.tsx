@@ -71,7 +71,7 @@ function NeedsYouBar() {
 
   return (
     <div
-      className="readout -mx-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-[color-mix(in_srgb,var(--amber)_35%,transparent)] bg-[color-mix(in_srgb,var(--amber)_9%,transparent)] px-4 py-1.5 text-[0.7rem] text-amber sm:-mx-6 sm:px-6"
+      className="readout -mx-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-[color-mix(in_srgb,var(--amber)_35%,transparent)] bg-[color-mix(in_srgb,var(--amber)_9%,transparent)] px-4 py-1.5 text-[0.7rem] text-amber sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 xl:-mx-12 xl:px-12"
       role="status"
       aria-label="Needs your attention"
     >
@@ -115,9 +115,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (!token) return null;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 sm:px-6">
-      <header className="sticky top-0 z-20 -mx-4 border-b border-line bg-[color-mix(in_srgb,var(--bg)_88%,transparent)] px-4 pt-3 pb-3 backdrop-blur sm:-mx-6 sm:px-6">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-4">
+    <div className="flex min-h-screen w-full flex-col px-4 sm:px-6 lg:px-8 xl:px-12">
+      <header className="sticky top-0 z-20 -mx-4 border-b border-line bg-[color-mix(in_srgb,var(--bg)_88%,transparent)] px-4 pt-3 pb-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 xl:-mx-12 xl:px-12">
+        <div className="flex w-full items-center gap-4">
           <Link href="/" className="shrink-0">
             <Wordmark />
           </Link>
