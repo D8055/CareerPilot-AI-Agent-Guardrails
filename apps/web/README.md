@@ -16,7 +16,9 @@ Point it at the API with `NEXT_PUBLIC_API_URL` (defaults to
 `http://127.0.0.1:8000`). Start the API from the repo root:
 
 ```powershell
-$env:CAREERPILOT_OWNER_PASSWORD='devpass123'
+# easiest: run start.cmd at the repo root instead — it does all of this.
+# CAREERPILOT_OWNER_PASSWORD is optional; setting it RESETS the owner
+# password on startup (env var always wins), so only set it on purpose.
 .venv\Scripts\uvicorn main:app --app-dir apps/api --port 8000
 ```
 

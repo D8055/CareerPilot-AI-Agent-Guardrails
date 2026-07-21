@@ -25,9 +25,10 @@ def get_pool() -> dict:
 # ---------- ETL: career pool -> career_items (the RAG index) ----------
 
 def etl_pool(db: Session) -> int:
-    """Idempotent: wipes and re-indexes career_items from the active pool."""
+    """Idempotent: wipes and re-indexes the POOL-sourced career_items.
+    Owner-added items (source='owner') are never touched."""
     pool = get_pool()
-    db.query(CareerItem).delete()
+    db.query(CareerItem).filter_by(source="pool").delete()
     items: list[CareerItem] = []
     meta = pool.get("meta") or {}
     if meta.get("fallback_summary"):
@@ -56,6 +57,19 @@ def etl_pool(db: Session) -> int:
         db.add(it)
     db.commit()
     return len(items)
+
+
+def add_career_item(db: Session, text: str, kind: str = "bullet",
+                    section: str = "") -> CareerItem:
+    """Owner-asserted plain-text addition to the career record. Embedded
+    immediately so RAG evidence includes it from the next query on."""
+    item = CareerItem(kind=kind or "bullet", section=section or "added by owner",
+                      text=text.strip(), source="owner",
+                      evidence="owner-added via UI",
+                      embedding=get_embedder().embed([text.strip()])[0])
+    db.add(item)
+    db.commit()
+    return item
 
 
 def rag_query(db: Session, text: str, k: int = 5) -> list[dict]:

@@ -108,3 +108,37 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+/** Multipart upload — browser sets the Content-Type boundary itself. */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file);
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", headers, body: form });
+  if (!res.ok) {
+    let detail = `Upload failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (typeof data?.detail === "string") detail = data.detail;
+    } catch { /* keep default */ }
+    throw new ApiError(detail, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+/** Authenticated file download — bearer tokens don't ride plain <a> links. */
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_URL}${path}`, { headers });
+  if (!res.ok) throw new ApiError(`Download failed (${res.status})`, res.status);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

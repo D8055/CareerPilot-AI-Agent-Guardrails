@@ -61,14 +61,25 @@ export interface CareerItem {
   section: string;
   text: string;
   tier: string | number;
+  source?: string; // pool | owner
 }
 
 export interface RagHit {
+  id?: number;
   ref: string;
   kind: string;
   section: string;
   text: string;
   score: number;
+}
+
+export interface ResumeMeta {
+  uploaded: boolean;
+  id?: number;
+  filename?: string;
+  content_type?: string;
+  size?: number;
+  ts?: string;
 }
 
 export interface Question {

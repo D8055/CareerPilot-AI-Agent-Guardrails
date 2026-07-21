@@ -215,7 +215,89 @@ def career(user: dict = Depends(current_user), db: Session = Depends(get_db)):
     from db import CareerItem
     items = db.execute(select(CareerItem)).scalars()
     return [{"id": i.id, "ref": i.ref, "kind": i.kind, "section": i.section,
-             "text": i.text, "tier": i.tier} for i in items]
+             "text": i.text, "tier": i.tier, "source": i.source} for i in items]
+
+
+class CareerItemBody(BaseModel):
+    text: str
+    kind: str = "bullet"
+    section: str = ""
+
+
+@router.post("/career/items", status_code=201)
+def add_career_item(body: CareerItemBody, user: dict = Depends(require_owner),
+                    db: Session = Depends(get_db)):
+    if not body.text.strip():
+        raise HTTPException(400, "text is empty")
+    item = services.add_career_item(db, body.text, body.kind, body.section)
+    return {"id": item.id, "kind": item.kind, "section": item.section,
+            "text": item.text, "tier": item.tier, "source": item.source}
+
+
+@router.delete("/career/items/{item_id}")
+def delete_career_item(item_id: int, user: dict = Depends(require_owner),
+                       db: Session = Depends(get_db)):
+    from db import CareerItem
+    item = db.get(CareerItem, item_id)
+    if not item:
+        raise HTTPException(404, "no such item")
+    if item.source != "owner":
+        raise HTTPException(400, "pool items are managed by the pool file, "
+                                 "not deletable here")
+    db.delete(item)
+    db.commit()
+    return {"ok": True}
+
+
+# ---------- resume upload ----------
+
+@router.get("/resume")
+def resume_meta(user: dict = Depends(current_user), db: Session = Depends(get_db)):
+    from db import Artifact
+    a = db.execute(select(Artifact).filter_by(kind="master_resume")
+                   .order_by(Artifact.ts.desc())).scalars().first()
+    if not a:
+        return {"uploaded": False}
+    return {"uploaded": True, "id": a.id, "filename": a.filename,
+            "content_type": a.content_type, "size": len(a.data),
+            "ts": a.ts.isoformat()}
+
+
+@router.post("/resume", status_code=201)
+async def upload_resume(request: Request, user: dict = Depends(require_owner),
+                        db: Session = Depends(get_db)):
+    from starlette.datastructures import UploadFile
+
+    from db import Artifact
+    form = await request.form()
+    file = form.get("file")
+    if not isinstance(file, UploadFile):
+        raise HTTPException(400, "send multipart form data with a 'file' field")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty file")
+    if len(data) > 10_000_000:
+        raise HTTPException(400, "file too large (10 MB max)")
+    a = Artifact(kind="master_resume", filename=file.filename or "resume",
+                 content_type=file.content_type or "application/octet-stream",
+                 data=data)
+    db.add(a)
+    db.commit()
+    return {"id": a.id, "filename": a.filename, "size": len(data)}
+
+
+@router.get("/resume/download")
+def download_resume(user: dict = Depends(current_user),
+                    db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from db import Artifact
+    a = db.execute(select(Artifact).filter_by(kind="master_resume")
+                   .order_by(Artifact.ts.desc())).scalars().first()
+    if not a:
+        raise HTTPException(404, "no resume uploaded yet")
+    return Response(content=a.data, media_type=a.content_type, headers={
+        "Content-Disposition": f'attachment; filename="{a.filename}"'})
 
 
 class RagBody(BaseModel):

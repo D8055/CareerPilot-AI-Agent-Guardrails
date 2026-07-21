@@ -6,7 +6,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import (JSON, DateTime, ForeignKey, Integer, LargeBinary, String,
+                        Text, create_engine, text)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +63,21 @@ class CareerItem(Base):
     text: Mapped[str] = mapped_column(Text)
     tier: Mapped[int] = mapped_column(Integer, default=1)
     evidence: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(16), default="pool")  # pool|owner
     embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+class Artifact(Base):
+    """Uploaded files (resumes). Bytes live in the DB — local dev DB is
+    gitignored, and deployed hosts have ephemeral filesystems (spec §7.2)."""
+    __tablename__ = "artifacts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(32), default="master_resume")
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(128), default="application/octet-stream")
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Plan(Base):
@@ -149,6 +164,21 @@ def make_engine(db_url: str | None = None):
     return create_engine(url, connect_args=connect_args)
 
 
+# additive column migrations for existing SQLite dev DBs (create_all only
+# creates missing tables, never missing columns)
+_MIGRATIONS = [
+    ("career_items", "source", "ALTER TABLE career_items ADD COLUMN source VARCHAR(16) DEFAULT 'pool'"),
+    ("jobs", "matched_keywords", "ALTER TABLE jobs ADD COLUMN matched_keywords JSON"),
+]
+
+
 def make_session_factory(engine) -> sessionmaker[Session]:
     Base.metadata.create_all(engine)
+    with engine.connect() as conn:
+        for table, column, ddl in _MIGRATIONS:
+            cols = [r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))] \
+                if engine.dialect.name == "sqlite" else []
+            if engine.dialect.name == "sqlite" and column not in cols:
+                conn.execute(text(ddl))
+                conn.commit()
     return sessionmaker(bind=engine, expire_on_commit=False)
