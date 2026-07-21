@@ -73,6 +73,28 @@ export interface RagHit {
   score: number;
 }
 
+export interface TailoredResume {
+  job_id: number;
+  plan_id: number;
+  created_by: string;
+  quality_pass: string | boolean | null;
+  resume: {
+    contact: {
+      name: string;
+      location?: string;
+      phone?: string;
+      email?: string;
+      linkedin?: string;
+      work_authorization?: string;
+    };
+    summary: string;
+    skills: { label: string; items: string[] }[];
+    experience: { org: string; title: string; dates: string; bullets: string[] }[];
+    projects: { name: string; stack: string; bullets: string[] }[];
+    accomplishments: string[];
+  };
+}
+
 export interface ResumeMeta {
   uploaded: boolean;
   id?: number;

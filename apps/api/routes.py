@@ -196,6 +196,20 @@ async def tailor_job(job_id: int, body: JDBody | None = None,
     return report
 
 
+@router.get("/jobs/{job_id}/resume")
+def tailored_resume(job_id: int, user: dict = Depends(current_user),
+                    db: Session = Depends(get_db)):
+    """The tailored resume CONTENT for this job (latest plan, resolved
+    against the pool). Docx/PDF rendering arrives with the runner phase."""
+    plan = db.execute(select(Plan).filter_by(job_id=job_id)
+                      .order_by(Plan.created_at.desc())).scalars().first()
+    if not plan:
+        raise HTTPException(404, "no tailored plan yet — run Tailor first")
+    resume = services.resolve_plan_to_resume(services.get_pool(), plan.plan_json)
+    return {"job_id": job_id, "plan_id": plan.id, "created_by": plan.created_by,
+            "quality_pass": plan.quality_pass, "resume": resume}
+
+
 @router.get("/jobs/{job_id}/plan")
 def latest_plan(job_id: int, user: dict = Depends(current_user),
                 db: Session = Depends(get_db)):

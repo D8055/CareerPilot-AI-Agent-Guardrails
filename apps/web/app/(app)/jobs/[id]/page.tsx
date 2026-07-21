@@ -4,7 +4,13 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, isOwner } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
-import type { JobDetail, PlanFull, PlanMeta, TailorResult } from "@/lib/types";
+import type {
+  JobDetail,
+  PlanFull,
+  PlanMeta,
+  TailoredResume,
+  TailorResult,
+} from "@/lib/types";
 import {
   ErrorNote,
   Eyebrow,
@@ -169,6 +175,9 @@ export default function JobPage() {
               </p>
             )}
           </section>
+
+          {/* ---- tailored resume ---- */}
+          {latestPlan && <ResumeView id={String(id)} planStamp={latestPlan.id} />}
 
           {/* ---- JD ---- */}
           <section className="panel p-5">
@@ -372,5 +381,108 @@ function TailorPanel({
         </div>
       )}
     </section>
+  );
+}
+
+function ResumeView({ id, planStamp }: { id: string; planStamp: number | string }) {
+  const [data, setData] = useState<TailoredResume | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<TailoredResume>(`/jobs/${id}/resume`)
+      .then((r) => {
+        if (!cancelled) setData(r);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, planStamp]);
+
+  if (error) return null;
+  if (!data) return null;
+  const r = data.resume;
+  const contactLine = [r.contact.location, r.contact.phone, r.contact.email,
+    r.contact.linkedin].filter(Boolean).join("  ·  ");
+
+  return (
+    <section className="panel p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="display text-base font-semibold">Tailored resume</h2>
+        <span className="readout text-[0.65rem] text-faint">
+          content preview · docx rendering arrives with the runner
+        </span>
+      </div>
+      {/* deliberately paper-colored in both themes — it is a document */}
+      <div className="rounded-lg border border-[var(--line)] bg-white px-8 py-7 font-serif text-[0.85rem] leading-relaxed text-neutral-900 shadow-sm">
+        <div className="text-center">
+          <div className="text-lg font-bold tracking-wide">{r.contact.name}</div>
+          <div className="mt-0.5 text-[0.75rem] text-neutral-600">{contactLine}</div>
+        </div>
+
+        <ResumeRule label="Summary" />
+        <p>{r.summary}</p>
+
+        <ResumeRule label="Skills" />
+        {r.skills.map((g) => (
+          <p key={g.label} className="mb-0.5">
+            <span className="font-semibold">{g.label}:</span> {g.items.join(", ")}
+          </p>
+        ))}
+
+        <ResumeRule label="Experience" />
+        {r.experience.map((role) => (
+          <div key={role.org} className="mb-2.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+              <span className="font-semibold">{role.org}</span>
+              <span className="text-[0.75rem] text-neutral-600">{role.dates}</span>
+            </div>
+            <div className="italic">{role.title}</div>
+            <ul className="mt-1 list-disc pl-5">
+              {role.bullets.map((b, i) => (
+                <li key={i}>{b}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+
+        <ResumeRule label="Projects" />
+        {r.projects.map((p) => (
+          <div key={p.name} className="mb-2.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+              <span className="font-semibold">{p.name}</span>
+              <span className="text-[0.75rem] text-neutral-600">{p.stack}</span>
+            </div>
+            <ul className="mt-1 list-disc pl-5">
+              {p.bullets.map((b, i) => (
+                <li key={i}>{b}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+
+        {r.accomplishments.length > 0 && (
+          <>
+            <ResumeRule label="Accomplishments" />
+            <ul className="list-disc pl-5">
+              {r.accomplishments.map((a, i) => (
+                <li key={i}>{a}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ResumeRule({ label }: { label: string }) {
+  return (
+    <div className="mb-1.5 mt-4 border-b border-neutral-300 pb-0.5 text-[0.7rem] font-bold uppercase tracking-[0.14em] text-neutral-700">
+      {label}
+    </div>
   );
 }

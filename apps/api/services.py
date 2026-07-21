@@ -116,6 +116,42 @@ def tailor_and_store(db: Session, job: Job) -> dict:
             "quality_pass": "pending"}
 
 
+def _desc(text: str) -> str:
+    """The resume rules: descriptions render hyphen-free (dates keep theirs)."""
+    return " ".join(text.replace("-", " ").split())
+
+
+def resolve_plan_to_resume(pool: dict, plan: dict) -> dict:
+    """Expand a selection plan into the full tailored resume content —
+    exactly what the docx renderer will produce, as structured data."""
+    roles_by_id = {r["id"]: r for r in pool["experience"]}
+    projects_by_id = {p["id"]: p for p in pool["projects"]}
+
+    def bullets(entry: dict, source: dict) -> list[str]:
+        by_id = {b["id"]: b for b in source["bullets"]}
+        return [_desc(by_id[bid]["text"]) for bid in entry.get("bullets", [])
+                if bid in by_id]
+
+    return {
+        "contact": pool["contact"],
+        "summary": _desc(plan.get("summary_text", "")),
+        "skills": [{"label": g["label"], "items": g["items"]}
+                   for g in plan.get("skills", [])],
+        "experience": [{
+            "org": roles_by_id[e["id"]]["org"],
+            "title": roles_by_id[e["id"]]["title"],
+            "dates": roles_by_id[e["id"]].get("dates", ""),
+            "bullets": bullets(e, roles_by_id[e["id"]]),
+        } for e in plan.get("experience", []) if e.get("id") in roles_by_id],
+        "projects": [{
+            "name": projects_by_id[e["id"]]["name"],
+            "stack": projects_by_id[e["id"]].get("stack", ""),
+            "bullets": bullets(e, projects_by_id[e["id"]]),
+        } for e in plan.get("projects", []) if e.get("id") in projects_by_id],
+        "accomplishments": [_desc(a["text"]) for a in pool["accomplishments"]],
+    }
+
+
 # ---------- evals (100% deterministic — the CI gates) ----------
 
 def run_evals(db: Session) -> dict:
