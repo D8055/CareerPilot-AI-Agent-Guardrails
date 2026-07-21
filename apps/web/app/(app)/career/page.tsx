@@ -11,8 +11,14 @@ import {
   Loading,
   TierBadge,
 } from "@/components/ui";
+import { useToast } from "@/components/Toast";
+import { useConfirm } from "@/components/Confirm";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 export default function CareerPage() {
+  useDocumentTitle("Career");
+  const { success, error: toastError } = useToast();
+  const confirm = useConfirm();
   const career = useApi(useCallback(() => api<CareerItem[]>("/career"), []));
   const owner = isOwner();
 
@@ -25,8 +31,22 @@ export default function CareerPage() {
   }
 
   async function remove(id: number | string) {
-    await api(`/career/items/${id}`, { method: "DELETE" });
-    career.refetch();
+    if (
+      !(await confirm({
+        title: "Remove this item?",
+        body: "It leaves your record and the evidence index.",
+        confirmLabel: "Remove",
+        destructive: true,
+      }))
+    )
+      return;
+    try {
+      await api(`/career/items/${id}`, { method: "DELETE" });
+      career.refetch();
+      success("Removed from the record");
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Could not remove it.");
+    }
   }
 
   return (
@@ -97,6 +117,7 @@ export default function CareerPage() {
 }
 
 function ResumePanel({ owner }: { owner: boolean }) {
+  const { success, error: toastError } = useToast();
   const meta = useApi(useCallback(() => api<ResumeMeta>("/resume"), []));
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -108,8 +129,10 @@ function ResumePanel({ owner }: { owner: boolean }) {
     try {
       await apiUpload("/resume", file);
       meta.refetch();
+      success("Resume uploaded");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
+      toastError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setBusy(false);
     }
@@ -185,27 +208,27 @@ function ResumePanel({ owner }: { owner: boolean }) {
 }
 
 function AddItemPanel({ onAdded }: { onAdded: () => void }) {
+  const { success, error: toastError } = useToast();
   const [text, setText] = useState("");
   const [section, setSection] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    setDone(false);
     try {
       await api("/career/items", {
         method: "POST",
         body: { text, section },
       });
       setText("");
-      setDone(true);
       onAdded();
+      success("Added to the record");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add it.");
+      toastError(err instanceof Error ? err.message : "Could not add it.");
     } finally {
       setBusy(false);
     }
@@ -221,6 +244,7 @@ function AddItemPanel({ onAdded }: { onAdded: () => void }) {
       <form onSubmit={submit} className="flex flex-col gap-2">
         <textarea
           className="textarea min-h-20"
+          aria-label="New record fact"
           placeholder="e.g. Built a Slack bot in Python that posts a weekly digest to my team channel"
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -229,6 +253,7 @@ function AddItemPanel({ onAdded }: { onAdded: () => void }) {
         <div className="flex gap-2">
           <input
             className="input flex-1"
+            aria-label="Section"
             placeholder="Section (optional, e.g. Projects)"
             value={section}
             onChange={(e) => setSection(e.target.value)}
@@ -238,13 +263,14 @@ function AddItemPanel({ onAdded }: { onAdded: () => void }) {
           </button>
         </div>
       </form>
-      {done && <p className="mt-2 text-sm text-green">Added to the record.</p>}
       {error && <p className="mt-2 text-sm text-red">{error}</p>}
     </section>
   );
 }
 
 function AnswerBankPanel({ owner }: { owner: boolean }) {
+  const { success, error: toastError } = useToast();
+  const confirm = useConfirm();
   const answers = useApi(useCallback(() => api<AnswerEntry[]>("/answers"), []));
   const [form, setForm] = useState({ question: "", pattern: "", answer: "" });
   const [busy, setBusy] = useState(false);
@@ -261,19 +287,31 @@ function AnswerBankPanel({ owner }: { owner: boolean }) {
       await api("/answers", { method: "POST", body });
       setForm({ question: "", pattern: "", answer: "" });
       answers.refetch();
+      success("Answer saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add the answer.");
+      toastError(err instanceof Error ? err.message : "Could not add the answer.");
     } finally {
       setBusy(false);
     }
   }
 
   async function remove(id: number | string) {
+    if (
+      !(await confirm({
+        title: "Delete this answer?",
+        confirmLabel: "Delete",
+        destructive: true,
+      }))
+    )
+      return;
     try {
       await api(`/answers/${id}`, { method: "DELETE" });
       answers.refetch();
+      success("Answer deleted");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete it.");
+      toastError(err instanceof Error ? err.message : "Could not delete it.");
     }
   }
 
@@ -345,12 +383,14 @@ function AnswerBankPanel({ owner }: { owner: boolean }) {
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <input
               className="input"
+              aria-label="Question"
               placeholder="Question, e.g. Are you willing to relocate?"
               value={form.question}
               onChange={(e) => setForm({ ...form, question: e.target.value })}
             />
             <input
               className="input"
+              aria-label="Match pattern (regex)"
               placeholder="optional regex, e.g. salary|compensation"
               value={form.pattern}
               onChange={(e) => setForm({ ...form, pattern: e.target.value })}
@@ -359,6 +399,7 @@ function AnswerBankPanel({ owner }: { owner: boolean }) {
           <div className="flex gap-2">
             <input
               className="input flex-1"
+              aria-label="Answer"
               placeholder="Answer"
               value={form.answer}
               onChange={(e) => setForm({ ...form, answer: e.target.value })}
@@ -411,6 +452,7 @@ function RagSearch() {
       <form onSubmit={submit} className="flex gap-2">
         <input
           className="input"
+          aria-label="Evidence search query"
           placeholder="e.g. distributed systems experience"
           value={query}
           onChange={(e) => setQuery(e.target.value)}

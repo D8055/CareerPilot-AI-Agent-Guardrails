@@ -17,7 +17,8 @@
   --line-strong: #b4bfd2;
   --ink: #16203a;
   --ink-dim: #4e5a74;
-  --ink-faint: #8590a6;
+  /* faint darkened to meet WCAG 1.4.3 (4.5:1 on --bg); still the lightest text */
+  --ink-faint: #5c6880;
   --accent: #a22a92;
   --accent-hover: #86217a;
   --cyan: #0b7285;
@@ -36,7 +37,8 @@
   --line-strong: #33405f;
   --ink: #e7ecf5;
   --ink-dim: #97a2ba;
-  --ink-faint: #616e8a;
+  /* faint lightened to meet WCAG 1.4.3 (4.5:1 on dark --bg) */
+  --ink-faint: #737f9c;
   --accent: #e07bd4;
   --accent-hover: #eb96e0;
   --cyan: #7dd6e8;
@@ -147,6 +149,14 @@ body {
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* WCAG 2.5.8 target size: any interactive control stays >= 24px even when
+   visually small (icon-only ✕ buttons, chips acting as buttons). */
+.btn,
+.tap {
+  min-height: 1.75rem;
+  min-width: 1.75rem;
+  justify-content: center;
+}
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -162,6 +172,19 @@ body {
 }
 .dark .btn-primary:hover:not(:disabled) {
   color: #10131c;
+}
+.btn-danger {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--bg);
+}
+.dark .btn-danger {
+  color: #10131c;
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red) 82%, black);
+  border-color: color-mix(in srgb, var(--red) 82%, black);
+  color: var(--bg);
 }
 .btn-quiet {
   border-color: transparent;
@@ -288,8 +311,41 @@ body {
 .pulse {
   animation: cp-pulse 2.4s ease-in-out infinite;
 }
+/* skip-to-content link: off-screen until focused (WCAG 2.4.1) */
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  transform: translateY(-150%);
+  background: var(--accent);
+  color: var(--bg);
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.dark .skip-link {
+  color: #10131c;
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* toast stack (top-right); auto-dismiss with a subtle rise-in */
+@keyframes cp-toast-in {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast {
+  animation: cp-toast-in 160ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pulse {
+    animation: none;
+  }
+  .toast {
     animation: none;
   }
   * {

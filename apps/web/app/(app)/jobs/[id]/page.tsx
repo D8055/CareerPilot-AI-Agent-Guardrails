@@ -21,6 +21,8 @@ import {
   StatusChip,
   fmtDate,
 } from "@/components/ui";
+import { useToast } from "@/components/Toast";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 const STATUSES = [
   "discovered",
@@ -51,6 +53,8 @@ export default function JobPage() {
       cancelled = true;
     };
   }, [id, job.data?.plans?.length]);
+
+  useDocumentTitle(job.data?.company || "Job");
 
   if (job.loading) return <Loading label="Reading the job" />;
   if (job.error) return <ErrorNote message={job.error} />;
@@ -250,6 +254,7 @@ function StatusEditor({
   current: string;
   onSaved: () => void;
 }) {
+  const { success, error: toastError } = useToast();
   const [status, setStatus] = useState(current);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -266,8 +271,10 @@ function StatusEditor({
       });
       setNote("");
       onSaved();
+      success(`Status set to ${status}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update status.");
+      toastError(err instanceof Error ? err.message : "Could not update status.");
     } finally {
       setBusy(false);
     }
@@ -321,6 +328,7 @@ function TailorPanel({
   initialJd: string;
   onResult: (r: TailorResult) => void;
 }) {
+  const { success, error: toastError } = useToast();
   const [jd, setJd] = useState(initialJd);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -337,8 +345,10 @@ function TailorPanel({
       });
       setResult(r);
       onResult(r);
+      success(`Tailored — match ${r.match_score ?? "?"}%`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Tailor run failed.");
+      toastError(err instanceof Error ? err.message : "Tailor run failed.");
     } finally {
       setBusy(false);
     }
@@ -354,6 +364,7 @@ function TailorPanel({
       <form onSubmit={submit} className="flex flex-col gap-3">
         <textarea
           className="textarea min-h-40"
+          aria-label="Job description"
           placeholder="Paste the job description here"
           value={jd}
           onChange={(e) => setJd(e.target.value)}
@@ -387,6 +398,7 @@ function TailorPanel({
 
 function ResumeView({ id, planStamp }: { id: string; planStamp: number | string }) {
   const owner = isOwner();
+  const { success, error: toastError } = useToast();
   const [status, setStatus] = useState<ResumePdfStatus | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -428,13 +440,18 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
     setBusy(true);
     setError(null);
     try {
-      await api(`/jobs/${id}/resume/render`, { method: "POST" });
+      const result = await api<{ verified?: boolean }>(
+        `/jobs/${id}/resume/render`,
+        { method: "POST" }
+      );
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
       setPdfUrl(null);
       const st = await loadStatus();
       if (st?.rendered) setPdfUrl(await apiBlobUrl(`/jobs/${id}/resume.pdf`));
+      success(result.verified ? "PDF generated" : "PDF generated (unverified)");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Rendering failed.");
+      toastError(e instanceof Error ? e.message : "Rendering failed.");
     } finally {
       setBusy(false);
     }

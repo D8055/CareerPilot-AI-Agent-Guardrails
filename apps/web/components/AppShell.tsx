@@ -116,6 +116,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen w-full flex-col px-4 sm:px-6 lg:px-8 xl:px-12">
+      <a href="#main" className="skip-link">
+        Skip to content
+      </a>
       <header className="sticky top-0 z-20 -mx-4 border-b border-line bg-[color-mix(in_srgb,var(--bg)_88%,transparent)] px-4 pt-3 pb-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 xl:-mx-12 xl:px-12">
         <div className="flex w-full items-center gap-4">
           <Link href="/" className="shrink-0">
@@ -153,7 +156,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <NeedsYouBar />
-      <main className="flex-1 py-6">{children}</main>
+      <main id="main" className="flex-1 py-6">{children}</main>
       <footer className="border-t border-line py-4">
         <div className="readout flex items-center justify-between text-[0.65rem] text-faint">
           <span>CAREERPILOT · PERSONAL FLIGHT DECK</span>

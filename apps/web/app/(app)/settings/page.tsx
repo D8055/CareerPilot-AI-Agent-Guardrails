@@ -5,6 +5,8 @@ import { api, isOwner } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import type { Blocker, BlockerStatus } from "@/lib/types";
 import { EmptyState, ErrorNote, Eyebrow, Loading } from "@/components/ui";
+import { useToast } from "@/components/Toast";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 const MCP_COMMAND = "claude mcp add careerpilot -- python apps/api/mcp_server.py";
 
@@ -15,6 +17,7 @@ const BLOCKER_STATUSES: BlockerStatus[] = [
 ];
 
 export default function SettingsPage() {
+  useDocumentTitle("Settings");
   const owner = isOwner();
   return (
     <div className="flex flex-col gap-6">
@@ -29,12 +32,14 @@ export default function SettingsPage() {
 }
 
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const { success } = useToast();
   const [copied, setCopied] = useState(false);
   async function copy() {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
+      success("Copied");
     } catch {
       /* clipboard unavailable */
     }
@@ -66,6 +71,7 @@ function ConnectClaude() {
 }
 
 function Blockers({ owner }: { owner: boolean }) {
+  const { success, error: toastError } = useToast();
   const blockers = useApi(useCallback(() => api<Blocker[]>("/status/blockers"), []));
   const [error, setError] = useState<string | null>(null);
 
@@ -74,8 +80,10 @@ function Blockers({ owner }: { owner: boolean }) {
     try {
       await api(`/status/blockers/${code}`, { method: "PATCH", body: { status } });
       await blockers.refetch();
+      success("Updated");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update the blocker.");
+      toastError(err instanceof Error ? err.message : "Could not update the blocker.");
     }
   }
 
@@ -179,6 +187,7 @@ function Blockers({ owner }: { owner: boolean }) {
 }
 
 function Share() {
+  const { success, error: toastError } = useToast();
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -191,8 +200,10 @@ function Share() {
         method: "POST",
       });
       setToken(res.viewer_token);
+      success("Viewer link ready");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create a viewer token.");
+      toastError(err instanceof Error ? err.message : "Could not create a viewer token.");
     } finally {
       setBusy(false);
     }

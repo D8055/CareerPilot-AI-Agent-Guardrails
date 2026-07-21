@@ -44,8 +44,15 @@ export function Eyebrow({ children }: { children: ReactNode }) {
 
 export function ErrorNote({ message }: { message: string }) {
   return (
-    <div className="panel border-[color-mix(in_srgb,var(--red)_45%,transparent)] px-4 py-3 text-sm text-red">
-      {message}
+    <div
+      role="alert"
+      className="panel flex items-start gap-2.5 border-[color-mix(in_srgb,var(--red)_45%,transparent)] px-4 py-3 text-sm text-red"
+    >
+      {/* icon so color is not the only error signal (WCAG 1.4.1) */}
+      <span aria-hidden className="mt-0.5 shrink-0 font-bold">
+        ⚠
+      </span>
+      <span>{message}</span>
     </div>
   );
 }

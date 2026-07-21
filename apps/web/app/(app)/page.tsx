@@ -22,6 +22,8 @@ import {
   StatusChip,
   fmtWhen,
 } from "@/components/ui";
+import { useToast } from "@/components/Toast";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 const COLUMNS = [
   "discovered",
@@ -33,6 +35,7 @@ const COLUMNS = [
 ];
 
 export default function Dashboard() {
+  useDocumentTitle("Board");
   const owner = isOwner();
 
   const jobs = useApi(useCallback(() => api<Job[]>("/jobs"), []));
@@ -410,6 +413,7 @@ function AttentionRow({
   owner: boolean;
   onChanged: () => void;
 }) {
+  const { success, error: toastError } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -423,6 +427,7 @@ function AttentionRow({
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action failed.");
+      toastError(err instanceof Error ? err.message : "Action failed.");
     } finally {
       setBusy(null);
     }
@@ -456,6 +461,9 @@ function AttentionRow({
                       );
                       if (res.enrichment && res.enrichment.includes("failed")) {
                         setNote(res.enrichment);
+                        toastError(res.enrichment);
+                      } else {
+                        success("Re-fetched");
                       }
                     })
                   }
@@ -479,6 +487,7 @@ function AttentionRow({
                     await api(`/intelligence/${item.intelligence_id}/retry`, {
                       method: "POST",
                     });
+                    success("Re-queued");
                   })
                 }
               >
@@ -493,6 +502,7 @@ function AttentionRow({
                     await api(`/intelligence/${item.intelligence_id}/dismiss`, {
                       method: "POST",
                     });
+                    success("Dismissed");
                   })
                 }
               >
@@ -539,6 +549,7 @@ function JobCard({ job }: { job: Job }) {
 }
 
 function AddJob({ onAdded }: { onAdded: () => void }) {
+  const { success, error: toastError } = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -572,8 +583,10 @@ function AddJob({ onAdded }: { onAdded: () => void }) {
       } else {
         setOpen(false);
       }
+      success("Job added");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add the job.");
+      toastError(err instanceof Error ? err.message : "Could not add the job.");
     } finally {
       setBusy(false);
     }
@@ -719,6 +732,7 @@ function QuestionRow({
   owner: boolean;
   onAnswered: () => void;
 }) {
+  const { success, error: toastError } = useToast();
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -728,13 +742,15 @@ function QuestionRow({
     setBusy(true);
     setError(null);
     try {
-      await api(`/questions/${q.id}/answer`, {
+      const res = await api<{ confirmed?: boolean }>(`/questions/${q.id}/answer`, {
         method: "POST",
         body: { answer },
       });
       onAnswered();
+      success(res.confirmed ? "Confirmed — re-tailored" : "Saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the answer.");
+      toastError(err instanceof Error ? err.message : "Could not save the answer.");
     } finally {
       setBusy(false);
     }
@@ -747,6 +763,7 @@ function QuestionRow({
         <form onSubmit={submit} className="mt-2 flex gap-2">
           <input
             className="input"
+            aria-label="Your answer"
             placeholder="Answer truthfully — this feeds the career record"
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}

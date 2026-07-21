@@ -5,6 +5,8 @@ import { api, isOwner } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import type { EvalRun } from "@/lib/types";
 import { EmptyState, ErrorNote, Loading, fmtDate } from "@/components/ui";
+import { useToast } from "@/components/Toast";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 function metric(run: EvalRun, key: string): string {
   const v = run.metrics?.[key];
@@ -14,6 +16,8 @@ function metric(run: EvalRun, key: string): string {
 }
 
 export default function EvalsPage() {
+  useDocumentTitle("Evals");
+  const { success, error: toastError } = useToast();
   const owner = isOwner();
   const evals = useApi(useCallback(() => api<EvalRun[]>("/evals"), []));
   const [busy, setBusy] = useState(false);
@@ -25,8 +29,10 @@ export default function EvalsPage() {
     try {
       await api("/evals/run", { method: "POST" });
       await evals.refetch();
+      success("Evals complete");
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Eval run failed.");
+      toastError(err instanceof Error ? err.message : "Eval run failed.");
     } finally {
       setBusy(false);
     }
