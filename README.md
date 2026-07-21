@@ -30,18 +30,26 @@ infra/            docker-compose (Postgres+pgvector, Redis), CI
 data/             demo_career_pool.yaml — FICTIONAL seed data
 ```
 
-## Quickstart
+## Quickstart — one command
+
+Double-click **`start.cmd`** (or run `.\start.ps1`). It installs anything
+missing on first run, starts the API and the web app in minimized windows,
+waits until both are healthy, and opens http://localhost:3000. Stop
+everything with **`stop.cmd`**.
+
+First API start prints a one-time owner password (or set
+`CAREERPILOT_OWNER_PASSWORD` — the env var always wins, even later).
+
+<details><summary>Manual start (what the script does)</summary>
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python -m pytest tests/ -q           # full test suite
 .venv\Scripts\uvicorn main:app --app-dir apps/api  # http://127.0.0.1:8000/docs
+cd apps/web; npm install; npm run dev              # http://localhost:3000
 ```
-
-First start prints a one-time owner password (or set
-`CAREERPILOT_OWNER_PASSWORD`). The web UI lives in `apps/web`
-(`npm install && npm run dev` → http://localhost:3000).
+</details>
 
 **Connect Claude (MCP):** `claude mcp add careerpilot -- python apps/api/mcp_server.py`
 from the repo root — seven tools (search/add/tailor jobs, career record,
