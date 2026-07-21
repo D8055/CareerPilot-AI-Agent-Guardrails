@@ -32,11 +32,13 @@ def master_corpus(pool: dict) -> str:
     return norm_term(" ".join(parts))
 
 
-def extract_jd_terms(jd_text: str, pool: dict) -> tuple[list[str], list[str]]:
+def extract_jd_terms(jd_text: str, pool: dict,
+                     extra_corpus: str = "") -> tuple[list[str], list[str]]:
     """(matched, missing): lexicon+pool terms found in the JD, split by whether
-    the verified pool can truthfully claim them."""
+    the verified content can truthfully claim them. extra_corpus carries
+    owner-confirmed additions (the applier's confirmation loop)."""
     jd = norm_term(jd_text)
-    corpus = master_corpus(pool)
+    corpus = master_corpus(pool) + " " + norm_term(extra_corpus)
     pool_terms = set()
     for g in pool["skills"]:
         pool_terms.update(norm_term(i) for i in g["items"])

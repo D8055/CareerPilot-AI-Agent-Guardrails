@@ -339,16 +339,34 @@ class AnswerBody(BaseModel):
 
 
 @router.post("/questions/{qid}/answer")
-def answer_question(qid: int, body: AnswerBody,
-                    user: dict = Depends(require_owner),
-                    db: Session = Depends(get_db)):
+async def answer_question(qid: int, body: AnswerBody,
+                          user: dict = Depends(require_owner),
+                          db: Session = Depends(get_db)):
+    """The applier's confirmation loop: 'no' just closes the question; real
+    evidence becomes a confirmed career item and the source job re-tailors,
+    so the match reflects it immediately."""
     q = db.get(Question, qid)
     if not q:
         raise HTTPException(404, "no such question")
     q.answer = body.answer
     q.status = "answered"
+    answer = body.answer.strip()
+    confirmed = answer and answer.lower() not in ("no", "no.", "n", "none", "nope")
+    result: dict = {"id": q.id, "status": q.status, "confirmed": bool(confirmed)}
+    if confirmed:
+        item = services.add_career_item(
+            db, f"{q.keyword}: {answer}", kind="confirmation",
+            section=f"confirmed: {q.keyword}")
+        result["career_item_id"] = item.id
+        job = db.get(Job, q.source_job) if q.source_job else None
+        if job and job.jd_text:
+            report = services.tailor_and_store(db, job)
+            result["retailored_job"] = job.id
+            result["new_match"] = report["match_score"]
+            await manager.broadcast({"type": "tailored", "job_id": job.id,
+                                     "match": report["match_score"]})
     db.commit()
-    return {"id": q.id, "status": q.status}
+    return result
 
 
 # ---------- evals ----------
@@ -457,9 +475,10 @@ async def complete(iid: int, body: CompleteBody,
             new_summary = body.result.get("summary_text", "")
             if new_summary:
                 from careerpilot_shared import check_honesty, validate_pool_plan
+                extra = services.owner_corpus(db)
                 candidate = {**plan.plan_json, "summary_text": new_summary}
-                violations = (check_honesty(new_summary, services.get_pool()) +
-                              validate_pool_plan(services.get_pool(), candidate))
+                violations = (check_honesty(new_summary, services.get_pool(), extra) +
+                              validate_pool_plan(services.get_pool(), candidate, extra))
                 if violations:
                     job.status = "failed"
                     job.result = {"rejected_by_honesty_guard": violations}

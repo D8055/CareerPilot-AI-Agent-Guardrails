@@ -42,14 +42,14 @@ def build_pool_plan(pool: dict, jd_terms: list[str],
     }
 
 
-def validate_pool_plan(pool: dict, plan: dict) -> list[str]:
+def validate_pool_plan(pool: dict, plan: dict, extra_corpus: str = "") -> list[str]:
     """Selection counts must respect each role's select bounds; the summary must
     pass the honesty guard. Empty list = valid."""
     v = []
     words = len(str(plan.get("summary_text", "")).split())
     if not 25 <= words <= 80:
         v.append(f"summary length {words} words (want 25-80)")
-    v += check_honesty(str(plan.get("summary_text", "")), pool)
+    v += check_honesty(str(plan.get("summary_text", "")), pool, extra_corpus)
     bold = plan.get("summary_bold") or ""
     if bold and bold not in plan.get("summary_text", ""):
         v.append("summary_bold is not a substring of summary_text")

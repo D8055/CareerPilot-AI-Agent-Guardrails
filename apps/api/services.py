@@ -81,17 +81,55 @@ def rag_query(db: Session, text: str, k: int = 5) -> list[dict]:
              "text": r.text, "score": round(s, 4)} for s, r in scored]
 
 
-# ---------- tailoring ----------
+# ---------- tailoring (the applier's method: deterministic plan + the
+# match-boost question loop; confirmations widen the truthful corpus) ----------
+
+def target_match() -> int:
+    return int(os.environ.get("CAREERPILOT_TARGET_MATCH", "80"))
+
+
+def owner_corpus(db: Session) -> str:
+    """Owner-confirmed content counts as claimable, exactly like the
+    applier's pool confirmations."""
+    rows = db.execute(select(CareerItem).filter_by(source="owner")).scalars()
+    return " ".join(r.text for r in rows)
+
+
+def create_match_questions(db: Session, job: Job, missing: list[str],
+                           score: int | None, limit: int = 5) -> int:
+    """Ported from the applier: below-target matches raise Apply-tab
+    questions for the top missing keywords — asked once per keyword EVER;
+    answers are one line of evidence or 'no'."""
+    if score is None or score >= target_match() or not missing:
+        return 0
+    asked_ever = {q.keyword for q in db.execute(select(Question)).scalars()}
+    made = 0
+    for kw in missing:
+        if made >= limit:
+            break
+        if kw in asked_ever:
+            continue
+        db.add(Question(
+            keyword=kw, source_job=job.id,
+            question=(f"The {job.company} posting wants \"{kw}\" (current match "
+                      f"{score}%, target {target_match()}%). Do you have real, "
+                      "verifiable experience with it? Answer with one line of "
+                      "evidence (what you built/did), or 'no'.")))
+        made += 1
+    return made
+
 
 def tailor_and_store(db: Session, job: Job) -> dict:
     """Deterministic fast path: instant plan + honesty validation, then a
     quality-pass intelligence job is queued for the runner."""
     pool = get_pool()
-    matched, missing = extract_jd_terms(job.jd_text, pool) if job.jd_text else ([], [])
+    extra = owner_corpus(db)
+    matched, missing = (extract_jd_terms(job.jd_text, pool, extra)
+                        if job.jd_text else ([], []))
     score = match_score(matched, missing)
     summary = (pool.get("meta") or {}).get("fallback_summary", "")
     plan = build_pool_plan(pool, matched, summary_text=summary)
-    violations = validate_pool_plan(pool, plan)
+    violations = validate_pool_plan(pool, plan, extra)
     if violations:
         raise ValueError(f"deterministic plan failed validation: {violations}")
 
@@ -109,11 +147,14 @@ def tailor_and_store(db: Session, job: Job) -> dict:
                            payload={"job_id": job.id, "plan_id": row.id}))
     db.add(Outbox(topic="application-events",
                   payload={"event": "tailored", "job_id": job.id, "match": score}))
+    questions_created = create_match_questions(db, job, missing, score)
     db.commit()
     return {"job_id": job.id, "plan_id": row.id, "match_score": score,
             "matched_keywords": matched, "missing_keywords": missing,
             "plan": plan, "plan_source": "deterministic",
-            "quality_pass": "pending"}
+            "quality_pass": "pending",
+            "questions_created": questions_created,
+            "target_match": target_match()}
 
 
 def _desc(text: str) -> str:
