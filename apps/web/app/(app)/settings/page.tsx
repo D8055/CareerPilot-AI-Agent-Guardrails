@@ -8,6 +8,7 @@ import { EmptyState, ErrorNote, Eyebrow, Loading } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
+// fallback only — /health serves the exact absolute command for this install
 const MCP_COMMAND = "claude mcp add careerpilot -- python apps/api/mcp_server.py";
 
 const BLOCKER_STATUSES: BlockerStatus[] = [
@@ -52,19 +53,24 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
 }
 
 function ConnectClaude() {
+  // the API knows its own install path; its command works from any directory
+  const health = useApi(
+    useCallback(() => api<{ mcp_command?: string }>("/health", { auth: false }), [])
+  );
+  const cmd = health.data?.mcp_command ?? MCP_COMMAND;
   return (
     <section className="panel p-5">
       <h2 className="display text-base font-semibold">Connect Claude</h2>
       <p className="mt-1 mb-3 text-sm text-dim">
-        Register CareerPilot as an MCP server. Any MCP client — Claude Code,
-        Claude Desktop, or anything else that speaks MCP — can drive the whole
-        product through it.
+        Run this once in any terminal. Any MCP client — Claude Code, Claude
+        Desktop, or anything else that speaks MCP — can then drive the whole
+        product.
       </p>
       <div className="flex items-center gap-2">
         <pre className="readout flex-1 overflow-x-auto rounded-lg bg-panel2 px-3 py-2.5 text-[0.75rem]">
-          {MCP_COMMAND}
+          {cmd}
         </pre>
-        <CopyButton text={MCP_COMMAND} />
+        <CopyButton text={cmd} />
       </div>
     </section>
   );

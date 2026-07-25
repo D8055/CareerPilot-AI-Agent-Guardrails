@@ -66,8 +66,16 @@ def create_app(db_url: str | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict:
         pool = services.get_pool()
-        return {"status": "ok", "pool_bullets": sum(
-            len(e["bullets"]) for s in ("experience", "projects") for e in pool[s])}
+        # mcp_command: the exact, absolute command for THIS install, so the
+        # Settings copy block never hands out a cwd-dependent snippet
+        py = services.REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+        if not py.exists():
+            py = services.REPO_ROOT / ".venv" / "bin" / "python"
+        server = services.REPO_ROOT / "apps" / "api" / "mcp_server.py"
+        return {"status": "ok",
+                "pool_bullets": sum(len(e["bullets"]) for s in
+                                    ("experience", "projects") for e in pool[s]),
+                "mcp_command": f'claude mcp add careerpilot -s user -- "{py}" "{server}"'}
 
     @app.post("/tailor", response_model=TailorReport)
     def tailor(req: TailorRequest) -> TailorReport:
