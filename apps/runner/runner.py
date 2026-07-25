@@ -37,10 +37,16 @@ def llm(prompt: str, system: str) -> str:
 def handle_tailor_quality(client: httpx.Client, payload: dict) -> dict:
     job = client.get(f"{API}/jobs/{payload['job_id']}", headers=HEADERS).json()
     plan = client.get(f"{API}/jobs/{payload['job_id']}/plan", headers=HEADERS).json()
+    resume = client.get(f"{API}/jobs/{payload['job_id']}/resume", headers=HEADERS).json()
     evidence = client.post(f"{API}/rag/query", headers=HEADERS,
                            json={"text": job.get("jd_text", ""), "k": 8}).json()
-    return run_quality_pass(llm, job.get("jd_text", ""), evidence,
-                            plan["plan"].get("summary_text", ""))
+    bullets = [b for role in resume.get("resume", {}).get("experience", [])
+               for b in role.get("bullets", [])]
+    return run_quality_pass(
+        llm, job.get("company", ""), job.get("jd_text", ""), evidence,
+        plan["plan"].get("summary_text", ""),
+        baseline_bullets=bullets,
+        missing_keywords=job.get("missing_keywords", []))
 
 
 def poll_once(client: httpx.Client) -> bool:

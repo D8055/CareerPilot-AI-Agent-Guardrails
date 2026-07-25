@@ -1,37 +1,56 @@
-"""The LangGraph quality-pass graph.
+"""The LangGraph quality-pass graph — a three-stage recruiter review.
 
-State machine per spec §2.3: retrieve evidence → tailor (LLM proposes a
-sharper summary bounded by that evidence) → review (adversarial refutation)
-→ loop back once on refutation → finish. The API's honesty guard is the
-final, non-negotiable gate on whatever leaves this graph.
+Stage 1 (analyze): act as a senior recruiter for the exact company; score the
+resume, name missing keywords and the red flags a hiring manager spots fast.
+Stage 2 (rewrite): rewrite experience with the Google XYZ formula, weaving in
+the keywords the candidate TRULY has and removing red flags.
+Stage 3 (ats): act as an ATS filter and a hiring manager reading 200 resumes;
+flag skippable sections and rewrite them to stop the scroll.
+
+Honesty boundary (non-negotiable, enforced in code, not by prompt): the API's
+check_honesty + validate_pool_plan re-validate everything this graph proposes.
+Missing keywords the record cannot back are NEVER written in — they are routed
+to the confirmation-question flow for the owner. LLM proposes, code disposes,
+human confirms.
 """
 from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-MAX_REVIEW_LOOPS = 2
-
-TAILOR_SYSTEM = (
-    "You tighten resume summaries. You may ONLY use facts present in the "
-    "provided evidence — no new numbers, no new technologies, no em dashes, "
-    "no hyphens. 25-80 words, one paragraph, plain text only."
+# Condensed from the humanizer skill (Wikipedia "Signs of AI writing"): the
+# output must not read as AI-generated.
+HUMANIZER_RULES = (
+    "Write like a human, not an AI. No em dashes or en dashes. No hyphens in "
+    "descriptions. Avoid AI-tell vocabulary (leverage, spearheaded, "
+    "tapestry, testament, showcase, underscore, robust, seamless, pivotal). "
+    "Vary sentence length. Prefer concrete specifics over promotional "
+    "adjectives. No rule-of-three lists, no 'not just X but Y' constructions, "
+    "no filler or hedging. Plain, direct, active voice."
 )
 
-REVIEW_SYSTEM = (
-    "You are an adversarial reviewer. Refute any claim in the candidate "
-    "summary that is not directly grounded in the evidence. Reply with "
-    "exactly 'GROUNDED' if every claim is backed, otherwise list the "
-    "ungrounded claims, one per line."
+FORMAT_RULES = (
+    "Match the candidate's existing resume format exactly: same section order, "
+    "same concise one-line bullet style, past-tense action verbs, no personal "
+    "pronouns, no headers or labels inside a bullet."
 )
+
+XYZ = ("Google XYZ formula: 'Accomplished X as measured by Y by doing Z' — lead "
+       "with the accomplishment, quantify it with the metric already in the "
+       "evidence, then name what was done. Keep every number and technology "
+       "exactly as it appears in the evidence; invent nothing.")
 
 
 class QualityState(TypedDict, total=False):
+    company: str
     jd_text: str
-    evidence: list[dict]        # top-k career items from /rag/query
-    baseline_summary: str       # the deterministic summary already live
-    proposal: str
-    verdict: str
-    loops: int
+    evidence: list[dict]         # top-k career items from /rag/query
+    baseline_summary: str        # the deterministic summary already live
+    baseline_bullets: list[str]  # the selected experience bullets, verbatim
+    missing_keywords: list[str]  # flagged; NOT claimable unless confirmed
+    analysis: str                # stage 1 output
+    rewritten_summary: str       # stage 2 output (guarded before use)
+    rewritten_experience: str    # stage 2 output (proposal for owner review)
+    ats_notes: str               # stage 3 output
     error: str
 
 
@@ -40,68 +59,136 @@ def _evidence_block(state: QualityState) -> str:
 
 
 def make_graph(llm):
-    """llm: callable (prompt, system) -> str. Injected so tests run without
-    the SDK and the SDK wrapper stays one line to swap."""
+    """llm: callable (prompt, system) -> str. Injected so tests run without the
+    Claude Agent SDK and the SDK wrapper stays one line to swap."""
 
-    def tailor(state: QualityState) -> QualityState:
+    # ---- stage 1: recruiter analysis ----
+    def analyze(state: QualityState) -> QualityState:
+        system = (
+            f"Act as a senior technical recruiter for {state.get('company') or 'this company'}. "
+            "You screen candidates for this exact role every day. Be blunt and specific."
+        )
         prompt = (
             f"Job description:\n{state['jd_text'][:4000]}\n\n"
-            f"Verified evidence (the ONLY permitted facts):\n{_evidence_block(state)}\n\n"
-            f"Current summary:\n{state['baseline_summary']}\n\n"
-            "Rewrite the summary to better address this job description. "
-            "Same facts, sharper emphasis. Output ONLY the summary text."
+            f"Candidate's verified resume evidence:\n{_evidence_block(state)}\n"
+            f"Current summary: {state['baseline_summary']}\n\n"
+            "Analyze this resume against this job description and give me:\n"
+            "1. A match score out of 100.\n"
+            "2. The top 5 missing keywords.\n"
+            "3. The 3 red flags a hiring manager would spot in under 10 seconds."
         )
-        if state.get("verdict") and state["verdict"] != "GROUNDED":
-            prompt += ("\n\nYour previous attempt was refuted:\n"
-                       f"{state['verdict']}\nRemove or replace those claims.")
         try:
-            proposal = llm(prompt, TAILOR_SYSTEM)
+            return {**state, "analysis": llm(prompt, system).strip()}
         except Exception as e:
             return {**state, "error": str(e)}
-        return {**state, "proposal": proposal.strip(),
-                "loops": state.get("loops", 0) + 1}
 
-    def review(state: QualityState) -> QualityState:
+    # ---- stage 2: XYZ rewrite (honesty-bounded) ----
+    def rewrite(state: QualityState) -> QualityState:
         if state.get("error"):
             return state
-        prompt = (f"Evidence:\n{_evidence_block(state)}\n\n"
-                  f"Candidate summary:\n{state['proposal']}")
+        system = (
+            "You rewrite resume bullets and summaries. " + HUMANIZER_RULES + " " + FORMAT_RULES
+        )
+        prompt = (
+            f"Job description:\n{state['jd_text'][:3000]}\n\n"
+            f"Recruiter analysis:\n{state.get('analysis', '')}\n\n"
+            "Verified evidence (the ONLY facts you may use — every number and "
+            f"technology must already appear here):\n{_evidence_block(state)}\n\n"
+            "Current summary:\n" + state["baseline_summary"] + "\n\n"
+            "Current experience bullets:\n"
+            + "\n".join(f"- {b}" for b in state.get("baseline_bullets", [])) + "\n\n"
+            "Rewrite my summary and experience section to naturally include the "
+            "keywords I TRULY have from the evidence and to remove the red flags. "
+            "Do NOT add any skill, tool, number, or keyword that is not in the "
+            "evidence above; if a keyword is missing from my evidence, leave it "
+            "out. " + XYZ + "\n\n"
+            "Return the rewritten summary first under a line 'SUMMARY:', then the "
+            "rewritten bullets under a line 'EXPERIENCE:', one bullet per line."
+        )
         try:
-            verdict = llm(prompt, REVIEW_SYSTEM)
+            out = llm(prompt, system).strip()
         except Exception as e:
             return {**state, "error": str(e)}
-        return {**state, "verdict": verdict.strip()}
+        summary, experience = _split_rewrite(out)
+        return {**state, "rewritten_summary": summary, "rewritten_experience": experience}
 
-    def route(state: QualityState) -> str:
+    # ---- stage 3: ATS + hiring-manager scan ----
+    def ats(state: QualityState) -> QualityState:
         if state.get("error"):
-            return "done"
-        if state.get("verdict", "").upper().startswith("GROUNDED"):
-            return "done"
-        if state.get("loops", 0) >= MAX_REVIEW_LOOPS:
-            return "refuted"      # give up: keep the deterministic summary
-        return "retry"
+            return state
+        system = (
+            "You are both an ATS keyword filter and a hiring manager reading 200 "
+            "resumes in one sitting. " + HUMANIZER_RULES + " " + FORMAT_RULES
+        )
+        prompt = (
+            f"Job description:\n{state['jd_text'][:3000]}\n\n"
+            "My rewritten resume:\n"
+            f"SUMMARY: {state.get('rewritten_summary', state['baseline_summary'])}\n"
+            f"EXPERIENCE:\n{state.get('rewritten_experience', '')}\n\n"
+            "Scan my new resume as an ATS and as a hiring manager. Tell me which "
+            "sections would get skipped, then rewrite those sections so they stop "
+            "the scroll. Keep every number and technology exactly as written; add "
+            "nothing that is not already there."
+        )
+        try:
+            return {**state, "ats_notes": llm(prompt, system).strip()}
+        except Exception as e:
+            return {**state, "error": str(e)}
 
     g = StateGraph(QualityState)
-    g.add_node("tailor", tailor)
-    g.add_node("review", review)
-    g.set_entry_point("tailor")
-    g.add_edge("tailor", "review")
-    g.add_conditional_edges("review", route,
-                            {"done": END, "refuted": END, "retry": "tailor"})
+    g.add_node("analyze", analyze)
+    g.add_node("rewrite", rewrite)
+    g.add_node("ats", ats)
+    g.set_entry_point("analyze")
+    g.add_edge("analyze", "rewrite")
+    g.add_edge("rewrite", "ats")
+    g.add_edge("ats", END)
     return g.compile()
 
 
-def run_quality_pass(llm, jd_text: str, evidence: list[dict],
-                     baseline_summary: str) -> dict:
-    """Returns {summary_text} on a grounded improvement, {} to keep the
-    deterministic summary, or {error} on infrastructure failure."""
+def _split_rewrite(text: str) -> tuple[str, str]:
+    """Parse the SUMMARY: / EXPERIENCE: sections from stage 2 output."""
+    summary, experience, mode = [], [], None
+    for line in text.splitlines():
+        up = line.strip().upper()
+        if up.startswith("SUMMARY:"):
+            mode = "s"
+            rest = line.split(":", 1)[1].strip()
+            if rest:
+                summary.append(rest)
+        elif up.startswith("EXPERIENCE:"):
+            mode = "e"
+            rest = line.split(":", 1)[1].strip()
+            if rest:
+                experience.append(rest)
+        elif mode == "s":
+            summary.append(line.strip())
+        elif mode == "e":
+            experience.append(line.strip())
+    return " ".join(x for x in summary if x).strip(), \
+        "\n".join(x for x in experience if x).strip()
+
+
+def run_quality_pass(llm, company: str, jd_text: str, evidence: list[dict],
+                     baseline_summary: str,
+                     baseline_bullets: list[str] | None = None,
+                     missing_keywords: list[str] | None = None) -> dict:
+    """Run the three-stage recruiter review. Returns the analysis, the proposed
+    rewrites, and the ATS notes. The caller (API) runs the honesty guard on the
+    rewritten summary before anything is committed; the rest is surfaced for the
+    owner to review."""
     graph = make_graph(llm)
     out: QualityState = graph.invoke({
-        "jd_text": jd_text, "evidence": evidence,
-        "baseline_summary": baseline_summary, "loops": 0,
+        "company": company, "jd_text": jd_text, "evidence": evidence,
+        "baseline_summary": baseline_summary,
+        "baseline_bullets": baseline_bullets or [],
+        "missing_keywords": missing_keywords or [],
     })
     if out.get("error"):
         return {"error": out["error"]}
-    if out.get("verdict", "").upper().startswith("GROUNDED") and out.get("proposal"):
-        return {"summary_text": out["proposal"]}
-    return {"refuted": out.get("verdict", "no grounded proposal")}
+    return {
+        "analysis": out.get("analysis", ""),
+        "summary_text": out.get("rewritten_summary", ""),
+        "rewritten_experience": out.get("rewritten_experience", ""),
+        "ats_notes": out.get("ats_notes", ""),
+    }
