@@ -176,60 +176,72 @@ def tailor_and_store(db: Session, job: Job) -> dict:
             "target_match": target_match()}
 
 
-def render_resume_pdf(db: Session, job: Job) -> dict:
-    """Render the job's latest plan into a clone-of-master PDF and cache it as
-    an artifact. Requires an uploaded master resume and a Windows+Word host."""
-    import tempfile
-    from pathlib import Path
+VARIANTS = ("onepage", "twopage")
 
-    import rendering
+
+def _variant_artifact(db: Session, job_id: int, variant: str):
+    from db import Artifact
+    for a in db.execute(select(Artifact).filter_by(kind="resume_pdf", job_id=job_id)
+                        .order_by(Artifact.ts.desc())).scalars():
+        if (a.meta or {}).get("variant", "twopage") == variant:
+            return a
+    return None
+
+
+def render_resume_pdf(db: Session, job: Job, variant: str = "twopage") -> dict:
+    """Generate the job's latest plan into a 1-page or 2-page resume PDF and
+    cache it as an artifact. Pure Python (reportlab) — no Word, any host."""
+    import resume_pdf as gen
     from db import Artifact
 
-    if not rendering.render_available():
-        raise RuntimeError("PDF rendering needs Windows + Microsoft Word; not "
-                           "available on this host (it becomes the runner's job).")
-    master = db.execute(select(Artifact).filter_by(kind="master_resume")
-                        .order_by(Artifact.ts.desc())).scalars().first()
-    if not master:
-        raise RuntimeError("upload your master resume first (Career page).")
+    if variant not in VARIANTS:
+        raise RuntimeError(f"unknown variant {variant!r}")
     plan = db.execute(select(Plan).filter_by(job_id=job.id)
                       .order_by(Plan.created_at.desc())).scalars().first()
     if not plan:
         raise RuntimeError("tailor this job first — no plan to render.")
 
-    with tempfile.TemporaryDirectory() as td:
-        work = Path(td)
-        master_path = work / "master.docx"
-        master_path.write_bytes(master.data)
-        pdf_bytes, failures = rendering.render_job_pdf(
-            master_path, get_pool(), plan.plan_json, work)
+    pdf_bytes = gen.build_resume_pdf(get_pool(), plan.plan_json, variant)
+    pages = gen.page_count(pdf_bytes)
+    failures = []
+    if variant == "onepage" and pages != 1:
+        failures.append(f"1-page resume overflowed to {pages} pages")
+    if variant == "twopage" and pages > 2:
+        failures.append(f"2-page resume overflowed to {pages} pages")
 
-    db.query(Artifact).filter_by(kind="resume_pdf", job_id=job.id).delete()
+    # replace any prior artifact for this job+variant
+    old = _variant_artifact(db, job.id, variant)
+    if old:
+        db.delete(old)
     art = Artifact(kind="resume_pdf", job_id=job.id, plan_id=plan.id,
-                   filename=f"{job.company or 'resume'}_tailored.pdf".replace(" ", "_"),
+                   filename=f"{(job.company or 'resume').replace(' ', '_')}_{variant}.pdf",
                    content_type="application/pdf", data=pdf_bytes,
-                   meta={"failures": failures})
+                   meta={"failures": failures, "variant": variant, "pages": pages})
     db.add(art)
     db.commit()
-    return {"rendered": True, "plan_id": plan.id, "verified": not failures,
-            "failures": failures, "size": len(pdf_bytes)}
+    return {"rendered": True, "variant": variant, "plan_id": plan.id,
+            "verified": not failures, "failures": failures,
+            "pages": pages, "size": len(pdf_bytes)}
 
 
 def resume_pdf_status(db: Session, job_id: int) -> dict:
-    import rendering
-    from db import Artifact
     latest_plan = db.execute(select(Plan).filter_by(job_id=job_id)
                              .order_by(Plan.created_at.desc())).scalars().first()
-    art = db.execute(select(Artifact).filter_by(kind="resume_pdf", job_id=job_id)
-                     .order_by(Artifact.ts.desc())).scalars().first()
+    variants = {}
+    for variant in VARIANTS:
+        a = _variant_artifact(db, job_id, variant)
+        variants[variant] = {
+            "rendered": a is not None,
+            "verified": bool(a and not (a.meta or {}).get("failures")),
+            "failures": (a.meta or {}).get("failures", []) if a else [],
+            "pages": (a.meta or {}).get("pages") if a else None,
+            "stale": bool(a and latest_plan and a.plan_id != latest_plan.id),
+            "ts": a.ts.isoformat() if a else None,
+        }
     return {
-        "rendering_available": rendering.render_available(),
+        "rendering_available": True,   # pure-Python generator, always available
         "has_plan": latest_plan is not None,
-        "rendered": art is not None,
-        "verified": bool(art and not (art.meta or {}).get("failures")),
-        "failures": (art.meta or {}).get("failures", []) if art else [],
-        "stale": bool(art and latest_plan and art.plan_id != latest_plan.id),
-        "ts": art.ts.isoformat() if art else None,
+        "variants": variants,
     }
 
 

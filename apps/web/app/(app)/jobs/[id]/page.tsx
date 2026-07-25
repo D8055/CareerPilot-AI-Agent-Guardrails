@@ -9,7 +9,6 @@ import type {
   PlanFull,
   PlanMeta,
   ResumePdfStatus,
-  TailoredResume,
   TailorResult,
 } from "@/lib/types";
 import {
@@ -396,10 +395,13 @@ function TailorPanel({
   );
 }
 
+type Variant = "onepage" | "twopage";
+
 function ResumeView({ id, planStamp }: { id: string; planStamp: number | string }) {
   const owner = isOwner();
   const { success, error: toastError } = useToast();
   const [status, setStatus] = useState<ResumePdfStatus | null>(null);
+  const [variant, setVariant] = useState<Variant>("twopage");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -415,40 +417,49 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
     }
   }, [id]);
 
-  // load status, then the PDF blob if one exists
+  // whenever the selected variant (or plan) changes, load its cached PDF if any
   useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
     (async () => {
       const st = await loadStatus();
-      if (cancelled || !st?.rendered) return;
+      if (cancelled || !st?.variants[variant]?.rendered) {
+        setPdfUrl(null);
+        return;
+      }
       try {
-        url = await apiBlobUrl(`/jobs/${id}/resume.pdf`);
+        url = await apiBlobUrl(`/jobs/${id}/resume.pdf?variant=${variant}`);
         if (!cancelled) setPdfUrl(url);
         else if (url) URL.revokeObjectURL(url);
       } catch {
-        /* status will still show the render/regenerate controls */
+        /* controls still render */
       }
     })();
     return () => {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [id, planStamp, loadStatus]);
+  }, [id, planStamp, variant, loadStatus]);
 
   async function render() {
     setBusy(true);
     setError(null);
     try {
-      const result = await api<{ verified?: boolean }>(
-        `/jobs/${id}/resume/render`,
+      const result = await api<{ verified?: boolean; pages?: number }>(
+        `/jobs/${id}/resume/render?variant=${variant}`,
         { method: "POST" }
       );
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
       setPdfUrl(null);
       const st = await loadStatus();
-      if (st?.rendered) setPdfUrl(await apiBlobUrl(`/jobs/${id}/resume.pdf`));
-      success(result.verified ? "PDF generated" : "PDF generated (unverified)");
+      if (st?.variants[variant]?.rendered) {
+        setPdfUrl(await apiBlobUrl(`/jobs/${id}/resume.pdf?variant=${variant}`));
+      }
+      success(
+        result.verified
+          ? `${variant === "onepage" ? "1-page" : "2-page"} resume generated`
+          : "Generated (page target not met)"
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Rendering failed.");
       toastError(e instanceof Error ? e.message : "Rendering failed.");
@@ -458,17 +469,35 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
   }
 
   if (!status) return null;
-  const filename = `${id}_tailored_resume.pdf`;
+  const vs = status.variants[variant];
+  const filename = `${id}_resume_${variant}.pdf`;
 
   return (
     <section className="panel p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="display text-base font-semibold">Tailored resume</h2>
         <div className="flex flex-wrap items-center gap-2">
-          {status.rendered && !status.verified && (
-            <span className="chip chip-amber text-[0.65rem]">render unverified</span>
-          )}
-          {status.stale && (
+          {/* 1-page / 2-page toggle */}
+          <div
+            className="readout flex items-center gap-0.5 rounded-lg border border-line bg-panel p-0.5 text-[0.7rem]"
+            role="group"
+            aria-label="Resume length"
+          >
+            {(["onepage", "twopage"] as Variant[]).map((val) => (
+              <button
+                key={val}
+                type="button"
+                className={`rounded-md px-2.5 py-1 ${
+                  variant === val ? "bg-accent text-bg" : "text-dim hover:text-ink"
+                }`}
+                aria-pressed={variant === val}
+                onClick={() => setVariant(val)}
+              >
+                {val === "onepage" ? "1 page" : "2 page"}
+              </button>
+            ))}
+          </div>
+          {vs.rendered && vs.stale && (
             <span className="chip chip-amber text-[0.65rem]">plan changed</span>
           )}
           {pdfUrl && (
@@ -483,13 +512,15 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
               <button
                 type="button"
                 className="btn"
-                onClick={() => apiDownload(`/jobs/${id}/resume.pdf`, filename)}
+                onClick={() =>
+                  apiDownload(`/jobs/${id}/resume.pdf?variant=${variant}`, filename)
+                }
               >
-                Download PDF
+                Download
               </button>
             </>
           )}
-          {owner && status.rendering_available && status.has_plan && (
+          {owner && status.has_plan && (
             <button
               type="button"
               className={pdfUrl ? "btn" : "btn btn-primary"}
@@ -497,12 +528,12 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
               onClick={render}
             >
               {busy
-                ? "Rendering…"
+                ? "Generating…"
                 : pdfUrl
-                  ? status.stale
+                  ? vs.stale
                     ? "Regenerate"
-                    : "Re-render"
-                  : "Generate PDF"}
+                    : "Re-generate"
+                  : `Generate ${variant === "onepage" ? "1-page" : "2-page"}`}
             </button>
           )}
         </div>
@@ -515,7 +546,7 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
           data={pdfUrl}
           type="application/pdf"
           className="h-[85vh] w-full rounded-lg border border-[var(--line)] bg-white"
-          aria-label="Tailored resume PDF"
+          aria-label={`Tailored resume, ${variant === "onepage" ? "one" : "two"} page`}
         >
           <p className="p-4 text-sm text-dim">
             Your browser can’t embed PDFs.{" "}
@@ -525,13 +556,11 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
             .
           </p>
         </object>
-      ) : !status.rendering_available ? (
-        <ResumeContentFallback id={id} planStamp={planStamp} />
       ) : status.has_plan ? (
         <p className="text-sm text-faint">
           {owner
-            ? "Generate the PDF to see the tailored resume in your master’s exact format."
-            : "No tailored PDF has been generated yet."}
+            ? `Generate the ${variant === "onepage" ? "1-page" : "2-page"} resume to preview it here.`
+            : "No tailored resume has been generated yet."}
         </p>
       ) : (
         <p className="text-sm text-faint">Tailor this job first.</p>
@@ -540,103 +569,3 @@ function ResumeView({ id, planStamp }: { id: string; planStamp: number | string 
   );
 }
 
-/** Structured-content preview — only used where Word rendering is unavailable
- * (e.g. a Linux deploy before the runner renders). On this Windows host the
- * real clone-of-master PDF is shown instead. */
-function ResumeContentFallback({
-  id,
-  planStamp,
-}: {
-  id: string;
-  planStamp: number | string;
-}) {
-  const [data, setData] = useState<TailoredResume | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    api<TailoredResume>(`/jobs/${id}/resume`)
-      .then((r) => !cancelled && setData(r))
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [id, planStamp]);
-
-  if (!data) return null;
-  const r = data.resume;
-  const contactLine = [r.contact.location, r.contact.phone, r.contact.email,
-    r.contact.linkedin].filter(Boolean).join("  ·  ");
-
-  return (
-    <>
-      <p className="mb-2 readout text-[0.65rem] text-faint">
-        content preview — PDF rendering runs on the Windows host / runner
-      </p>
-      <div className="rounded-lg border border-[var(--line)] bg-white px-8 py-7 font-serif text-[0.85rem] leading-relaxed text-neutral-900 shadow-sm">
-        <div className="text-center">
-          <div className="text-lg font-bold tracking-wide">{r.contact.name}</div>
-          <div className="mt-0.5 text-[0.75rem] text-neutral-600">{contactLine}</div>
-        </div>
-
-        <ResumeRule label="Summary" />
-        <p>{r.summary}</p>
-
-        <ResumeRule label="Skills" />
-        {r.skills.map((g) => (
-          <p key={g.label} className="mb-0.5">
-            <span className="font-semibold">{g.label}:</span> {g.items.join(", ")}
-          </p>
-        ))}
-
-        <ResumeRule label="Experience" />
-        {r.experience.map((role) => (
-          <div key={role.org} className="mb-2.5">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <span className="font-semibold">{role.org}</span>
-              <span className="text-[0.75rem] text-neutral-600">{role.dates}</span>
-            </div>
-            <div className="italic">{role.title}</div>
-            <ul className="mt-1 list-disc pl-5">
-              {role.bullets.map((b, i) => (
-                <li key={i}>{b}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
-
-        <ResumeRule label="Projects" />
-        {r.projects.map((p) => (
-          <div key={p.name} className="mb-2.5">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <span className="font-semibold">{p.name}</span>
-              <span className="text-[0.75rem] text-neutral-600">{p.stack}</span>
-            </div>
-            <ul className="mt-1 list-disc pl-5">
-              {p.bullets.map((b, i) => (
-                <li key={i}>{b}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
-
-        {r.accomplishments.length > 0 && (
-          <>
-            <ResumeRule label="Accomplishments" />
-            <ul className="list-disc pl-5">
-              {r.accomplishments.map((a, i) => (
-                <li key={i}>{a}</li>
-              ))}
-            </ul>
-          </>
-        )}
-      </div>
-    </>
-  );
-}
-
-function ResumeRule({ label }: { label: string }) {
-  return (
-    <div className="mb-1.5 mt-4 border-b border-neutral-300 pb-0.5 text-[0.7rem] font-bold uppercase tracking-[0.14em] text-neutral-700">
-      {label}
-    </div>
-  );
-}

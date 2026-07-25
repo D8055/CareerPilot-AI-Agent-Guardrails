@@ -19,6 +19,9 @@ def master_corpus(pool: dict) -> str:
         parts.append(pool["summary"]["text"])
     meta = pool.get("meta") or {}
     parts.append(meta.get("fallback_summary", ""))
+    for edu in pool.get("education", []):
+        parts.append(" ".join(str(edu.get(k, "")) for k in
+                              ("school", "degree", "notes", "coursework")))
     for g in pool["skills"]:
         parts.append(g["label"] + " " + ", ".join(g["items"]))
     for section in ("experience", "projects"):

@@ -95,14 +95,22 @@ export interface TailoredResume {
   };
 }
 
-export interface ResumePdfStatus {
-  rendering_available: boolean;
-  has_plan: boolean;
+export interface ResumeVariantStatus {
   rendered: boolean;
   verified: boolean;
   failures: string[];
+  pages: number | null;
   stale: boolean;
   ts: string | null;
+}
+
+export interface ResumePdfStatus {
+  rendering_available: boolean;
+  has_plan: boolean;
+  variants: {
+    onepage: ResumeVariantStatus;
+    twopage: ResumeVariantStatus;
+  };
 }
 
 export interface ResumeMeta {
