@@ -86,31 +86,126 @@ export default function CareerPage() {
               </div>
               <div className="panel divide-y divide-[var(--line)]">
                 {items.map((item) => (
-                  <div key={item.id} className="flex items-start gap-3 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm leading-relaxed">{item.text}</p>
-                      <div className="readout mt-1 text-[0.65rem] text-faint">
-                        {item.ref || "owner-added"} · {item.kind}
-                        {item.source === "owner" && " · added by you"}
-                      </div>
-                    </div>
-                    <TierBadge tier={item.tier} />
-                    {owner && item.source === "owner" && (
-                      <button
-                        type="button"
-                        className="btn btn-quiet px-2 py-1 text-xs"
-                        title="Remove this item"
-                        onClick={() => remove(item.id)}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
+                  <CareerItemRow
+                    key={item.id}
+                    item={item}
+                    owner={owner}
+                    onRemove={() => remove(item.id)}
+                    onSaved={career.refetch}
+                  />
                 ))}
               </div>
             </section>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** One record row with inline editing: pencil → textarea → Save. Pool bullets
+ * write back to the pool YAML server-side; owner items update directly. Kinds
+ * the API refuses to edit come back as a 400 whose detail we toast. */
+function CareerItemRow({
+  item,
+  owner,
+  onRemove,
+  onSaved,
+}: {
+  item: CareerItem;
+  owner: boolean;
+  onRemove: () => void;
+  onSaved: () => void;
+}) {
+  const { success, error: toastError } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.text);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api(`/career/items/${item.id}`, {
+        method: "PATCH",
+        body: { text: draft },
+      });
+      setEditing(false);
+      onSaved();
+      success("Saved to the record");
+    } catch (err) {
+      // 400s carry the server's reason (e.g. this kind isn't editable)
+      toastError(err instanceof Error ? err.message : "Could not save the edit.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-start gap-3 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              className="textarea min-h-20"
+              aria-label="Edit item text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn btn-primary px-3 py-1 text-xs"
+                disabled={busy || draft.trim().length === 0}
+                onClick={save}
+              >
+                {busy ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-quiet px-3 py-1 text-xs"
+                disabled={busy}
+                onClick={() => {
+                  setDraft(item.text);
+                  setEditing(false);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm leading-relaxed">{item.text}</p>
+        )}
+        <div className="readout mt-1 text-[0.65rem] text-faint">
+          {item.ref || "owner-added"} · {item.kind}
+          {item.source === "owner" && " · added by you"}
+        </div>
+      </div>
+      <TierBadge tier={item.tier} />
+      {owner && !editing && (
+        <button
+          type="button"
+          className="btn btn-quiet px-2 py-1 text-xs"
+          aria-label="Edit this item"
+          title="Edit this item"
+          onClick={() => {
+            setDraft(item.text);
+            setEditing(true);
+          }}
+        >
+          ✎
+        </button>
+      )}
+      {owner && item.source === "owner" && !editing && (
+        <button
+          type="button"
+          className="btn btn-quiet px-2 py-1 text-xs"
+          title="Remove this item"
+          onClick={onRemove}
+        >
+          ✕
+        </button>
       )}
     </div>
   );

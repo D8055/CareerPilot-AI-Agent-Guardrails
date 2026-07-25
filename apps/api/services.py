@@ -91,6 +91,41 @@ def add_career_item(db: Session, text: str, kind: str = "bullet",
     return item
 
 
+def edit_career_item(db: Session, item: CareerItem, new_text: str) -> CareerItem:
+    """Owner edits an item in place. Pool-sourced bullets write back to the
+    pool YAML (single source of truth — plans render from the pool), then the
+    item re-embeds. Owner-added items just update."""
+    new_text = new_text.strip()
+    if not new_text:
+        raise ValueError("text is empty")
+    if item.source == "pool":
+        if item.kind != "bullet":
+            raise ValueError("only bullets are editable in place; skills and the "
+                             "summary are managed in the pool file")
+        path = pool_path()
+        with open(path, encoding="utf-8") as f:
+            pool = yaml.safe_load(f)
+        hit = False
+        for section in ("experience", "projects"):
+            for entry in pool[section]:
+                for b in entry["bullets"]:
+                    if b["id"] == item.ref:
+                        b["text"] = new_text
+                        # a stale metric that no longer appears would break
+                        # metric bolding; drop it if it vanished from the text
+                        if b.get("metric") and b["metric"] not in new_text:
+                            b["metric"] = ""
+                        hit = True
+        if not hit:
+            raise ValueError(f"bullet {item.ref!r} not found in the pool file")
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(pool, f, allow_unicode=True, sort_keys=False, width=88)
+    item.text = new_text
+    item.embedding = get_embedder().embed([new_text])[0]
+    db.commit()
+    return item
+
+
 def rag_query(db: Session, text: str, k: int = 5) -> list[dict]:
     qv = get_embedder().embed([text])[0]
     rows = db.execute(select(CareerItem)).scalars().all()

@@ -97,8 +97,8 @@ def _apply_enrichment(job: Job, db: Session) -> str:
     if not job.jd_text and found["jd_text"]:
         job.jd_text = found["jd_text"]
     got_jd = bool(job.jd_text)
-    if got_jd:
-        job.status = "enriched"
+    # jobs stay in the New Jobs stage until the owner hits Apply — enrichment
+    # fills fields, it does not advance the pipeline (Saved-stage convention)
     note = (f"auto-enriched via {found['source']}: "
             f"{job.company or '?'} / {job.role or '?'}"
             + ("" if got_jd else " (no JD text found — paste it manually)"))
@@ -112,7 +112,7 @@ async def add_job(body: JobBody, user: dict = Depends(require_owner),
     job = Job(**body.model_dump())
     db.add(job)
     db.flush()
-    db.add(StatusEvent(job_id=job.id, status="discovered", note="added"))
+    db.add(StatusEvent(job_id=job.id, status="new", note="added"))
     note = ""
     if job.url and not (job.company and job.role and job.jd_text):
         note = _apply_enrichment(job, db)
@@ -138,6 +138,28 @@ async def enrich_job(job_id: int, user: dict = Depends(require_owner),
     out = _job_dict(job)
     out["enrichment"] = note
     return out
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: int, user: dict = Depends(require_owner),
+                     db: Session = Depends(get_db)):
+    """Remove a job and everything hanging off it (plans, PDFs, events,
+    queued passes). Questions survive: asked-once-ever must hold even if the
+    job that raised them is gone."""
+    from db import Artifact
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "no such job")
+    db.query(StatusEvent).filter_by(job_id=job_id).delete()
+    db.query(Plan).filter_by(job_id=job_id).delete()
+    db.query(Artifact).filter_by(job_id=job_id).delete()
+    for ij in db.execute(select(IntelligenceJob)).scalars():
+        if (ij.payload or {}).get("job_id") == job_id:
+            db.delete(ij)
+    db.delete(job)
+    db.commit()
+    await manager.broadcast({"type": "job_deleted", "job_id": job_id})
+    return {"ok": True}
 
 
 @router.get("/jobs/{job_id}")
@@ -285,6 +307,27 @@ def add_career_item(body: CareerItemBody, user: dict = Depends(require_owner),
     item = services.add_career_item(db, body.text, body.kind, body.section)
     return {"id": item.id, "kind": item.kind, "section": item.section,
             "text": item.text, "tier": item.tier, "source": item.source}
+
+
+class CareerItemEditBody(BaseModel):
+    text: str
+
+
+@router.patch("/career/items/{item_id}")
+def edit_career_item(item_id: int, body: CareerItemEditBody,
+                     user: dict = Depends(require_owner),
+                     db: Session = Depends(get_db)):
+    from db import CareerItem
+    item = db.get(CareerItem, item_id)
+    if not item:
+        raise HTTPException(404, "no such item")
+    try:
+        item = services.edit_career_item(db, item, body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"id": item.id, "ref": item.ref, "kind": item.kind,
+            "section": item.section, "text": item.text, "tier": item.tier,
+            "source": item.source}
 
 
 @router.delete("/career/items/{item_id}")

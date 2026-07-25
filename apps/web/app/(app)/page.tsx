@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, apiDownload, isOwner } from "@/lib/api";
+import { api, isOwner } from "@/lib/api";
 import { useApi, useLive } from "@/lib/hooks";
 import type {
   Attention,
@@ -13,30 +13,20 @@ import type {
   Runner,
   Stats,
 } from "@/lib/types";
-import { displayMatch } from "@/lib/types";
+import { displayMatch, isNewJob } from "@/lib/types";
 import {
   EmptyState,
   ErrorNote,
   Eyebrow,
   Loading,
   MatchGauge,
-  StatusChip,
-  fmtWhen,
 } from "@/components/ui";
 import { useToast } from "@/components/Toast";
+import { useConfirm } from "@/components/Confirm";
 import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
-const COLUMNS = [
-  "discovered",
-  "tailored",
-  "applied",
-  "interview",
-  "offer",
-  "rejected",
-];
-
-export default function Dashboard() {
-  useDocumentTitle("Board");
+export default function NewJobsPage() {
+  useDocumentTitle("New Jobs");
   const owner = isOwner();
 
   const jobs = useApi(useCallback(() => api<Job[]>("/jobs"), []));
@@ -54,39 +44,28 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs.refetch, stats.refetch, runners.refetch, questions.refetch, attention.refetch]);
 
-  // Board | Table — persisted per browser; read after mount so SSR matches.
-  const [view, setView] = useState<"board" | "table">("board");
-  useEffect(() => {
-    if (localStorage.getItem("cp_pipeline_view") === "table") setView("table");
-  }, []);
-  const pickView = useCallback((v: "board" | "table") => {
-    setView(v);
-    localStorage.setItem("cp_pipeline_view", v);
-  }, []);
-
   const wsOpen = useLive(refreshAll);
 
   const runnerOnline = (runners.data ?? []).some((r) => r.online);
-
-  const byColumn: Record<string, Job[]> = {};
-  const extras: string[] = [];
-  for (const job of jobs.data ?? []) {
-    const col = COLUMNS.includes(job.status) ? job.status : job.status;
-    if (!COLUMNS.includes(col) && !extras.includes(col)) extras.push(col);
-    (byColumn[col] ??= []).push(job);
-  }
-  const allColumns = [...COLUMNS, ...extras];
+  const allJobs = jobs.data ?? [];
+  const newJobs = allJobs.filter(isNewJob);
+  const pipelineCount = allJobs.length - newJobs.length;
+  const openQuestions =
+    stats.data?.open_questions ??
+    (questions.data ?? []).filter((q) => !q.answer).length;
 
   return (
     <div className="flex flex-col gap-6">
-      {/* ---- instrument cluster ---- */}
+      {/* ---- instrument cluster (simplified) ---- */}
       <section aria-label="Pipeline stats">
         <div className="panel px-5 py-4">
           <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
-            <Readout label="Jobs" value={stats.data?.jobs_total} />
-            <Readout label="Plans" value={stats.data?.plans} />
-            <Readout label="Open questions" value={stats.data?.open_questions} />
-            <Readout label="QC pending" value={stats.data?.quality_passes_pending} />
+            <Readout label="New" value={jobs.data ? newJobs.length : undefined} />
+            <Readout
+              label="In pipeline"
+              value={jobs.data ? pipelineCount : undefined}
+            />
+            <Readout label="Questions" value={openQuestions} />
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <Link
@@ -127,64 +106,23 @@ export default function Dashboard() {
       {stats.error && <ErrorNote message={stats.error} />}
       {jobs.error && !stats.error && <ErrorNote message={jobs.error} />}
 
-      {/* ---- pipeline board ---- */}
-      <section aria-label="Pipeline board" className="flex flex-col gap-3">
+      {/* ---- new jobs list ---- */}
+      <section aria-label="New jobs" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="display text-lg font-semibold">Pipeline</h1>
+          <h1 className="display text-lg font-semibold">New Jobs</h1>
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <ViewToggle view={view} onChange={pickView} />
-            <ExportCsv />
             {owner && <AddJob onAdded={refreshAll} />}
           </div>
         </div>
 
         {jobs.loading ? (
-          <Loading label="Reading the pipeline" />
-        ) : (jobs.data ?? []).length === 0 ? (
-          <EmptyState>
-            No jobs on the board yet. Add one above, or push one through the
-            API or a connected MCP client.
-          </EmptyState>
-        ) : view === "table" ? (
-          <JobsTable jobs={jobs.data ?? []} />
+          <Loading label="Reading new jobs" />
+        ) : newJobs.length === 0 ? (
+          <EmptyState>No new jobs. Paste a posting URL to add one.</EmptyState>
         ) : (
-          <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6">
-            {/* columns grow to share the full width; scroll only when cramped */}
-            <div className="flex gap-3">
-              {allColumns.map((col) => {
-                const items = byColumn[col] ?? [];
-                if (items.length === 0 && !COLUMNS.includes(col)) return null;
-                return (
-                  <div key={col} className="min-w-[12rem] flex-1">
-                    <div className="mb-2 flex items-baseline justify-between px-1">
-                      <Eyebrow>{col}</Eyebrow>
-                      <span className="readout text-xs text-faint">
-                        {items.length}
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {items.length === 0 ? (
-                        <div className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-xs text-faint">
-                          empty
-                        </div>
-                      ) : (
-                        items.map((job) => <JobCard key={job.id} job={job} />)
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <NewJobsList jobs={newJobs} owner={owner} onChanged={refreshAll} />
         )}
       </section>
-
-      {/* ---- items that need a human ---- */}
-      <AttentionPanel
-        items={attention.data?.items ?? []}
-        owner={owner}
-        onChanged={refreshAll}
-      />
 
       {/* ---- open questions ---- */}
       <QuestionsPanel
@@ -192,6 +130,13 @@ export default function Dashboard() {
         error={questions.error}
         owner={owner}
         onAnswered={refreshAll}
+      />
+
+      {/* ---- items that need a human ---- */}
+      <AttentionPanel
+        items={attention.data?.items ?? []}
+        owner={owner}
+        onChanged={refreshAll}
       />
     </div>
   );
@@ -208,174 +153,349 @@ function Readout({ label, value }: { label: string; value: number | undefined })
   );
 }
 
-function ViewToggle({
-  view,
-  onChange,
+/* ---- the "Saved" stage: select, apply (begin tailoring), delete ---- */
+
+function NewJobsList({
+  jobs,
+  owner,
+  onChanged,
 }: {
-  view: "board" | "table";
-  onChange: (v: "board" | "table") => void;
+  jobs: Job[];
+  owner: boolean;
+  onChanged: () => void;
 }) {
+  const { success, error: toastError } = useToast();
+  const confirm = useConfirm();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  // drop selections for rows that left the list (applied or deleted)
+  useEffect(() => {
+    setSelected((prev) => {
+      const ids = new Set(jobs.map((j) => String(j.id)));
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [jobs]);
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** Apply = POST /jobs/{id}/tailor — it only BEGINS tailoring. */
+  async function applyOne(job: Job) {
+    setBusy(true);
+    try {
+      await api(`/jobs/${job.id}/tailor`, { method: "POST" });
+      success("Tailoring started — moved to Board");
+      onChanged();
+    } catch (err) {
+      // usually a 400: no JD yet — the row links to the job page to paste it
+      toastError(err instanceof Error ? err.message : "Could not start tailoring.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyAll() {
+    const targets = jobs.filter((j) => selected.has(String(j.id)));
+    setBusy(true);
+    let ok = 0;
+    let needJd = 0;
+    for (const job of targets) {
+      try {
+        await api(`/jobs/${job.id}/tailor`, { method: "POST" });
+        ok++;
+      } catch {
+        needJd++;
+      }
+    }
+    setBusy(false);
+    onChanged();
+    const summary = [
+      ok > 0 ? `${ok} tailored` : null,
+      needJd > 0 ? `${needJd} need${needJd === 1 ? "s" : ""} a JD` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    if (needJd > 0) toastError(summary || "Nothing tailored");
+    else success(summary || "Nothing selected");
+  }
+
+  async function deleteSelected() {
+    const targets = jobs.filter((j) => selected.has(String(j.id)));
+    if (
+      !(await confirm({
+        title: `Delete ${targets.length} job${targets.length === 1 ? "" : "s"}?`,
+        body: "They leave CareerPilot entirely — plans and history included.",
+        confirmLabel: "Delete",
+        destructive: true,
+      }))
+    )
+      return;
+    setBusy(true);
+    let ok = 0;
+    let failed = 0;
+    for (const job of targets) {
+      try {
+        await api(`/jobs/${job.id}`, { method: "DELETE" });
+        ok++;
+      } catch {
+        failed++;
+      }
+    }
+    setBusy(false);
+    onChanged();
+    if (failed > 0) toastError(`${ok} deleted, ${failed} failed`);
+    else success(`${ok} deleted`);
+  }
+
   return (
-    <div
-      className="readout flex items-center gap-0.5 rounded-lg border border-line bg-panel p-0.5 text-[0.7rem]"
-      role="group"
-      aria-label="Pipeline view"
-    >
-      {(["board", "table"] as const).map((v) => (
-        <button
-          key={v}
-          type="button"
-          aria-pressed={view === v}
-          onClick={() => onChange(v)}
-          className={`rounded-md px-2.5 py-1 font-semibold uppercase tracking-wide transition-colors ${
-            view === v ? "bg-panel2 text-ink" : "text-faint hover:text-ink"
-          }`}
+    <div className="flex flex-col gap-2">
+      {selected.size > 0 && (
+        <div
+          className="panel slide-in flex flex-wrap items-center gap-3 border-[var(--line-strong)] px-4 py-2.5"
+          role="toolbar"
+          aria-label="Bulk actions"
         >
-          {v}
-        </button>
-      ))}
+          <span className="readout text-xs font-semibold">
+            {selected.size} selected
+          </span>
+          {owner && (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary px-3 py-1 text-xs"
+                disabled={busy}
+                onClick={applyAll}
+              >
+                {busy ? "Working…" : "Apply all"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger px-3 py-1 text-xs"
+                disabled={busy}
+                onClick={deleteSelected}
+              >
+                Delete
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            className="btn btn-quiet ml-auto px-2.5 py-1 text-xs"
+            onClick={() => setSelected(new Set())}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      <div className="panel divide-y divide-[var(--line)]">
+        {jobs.map((job) => (
+          <NewJobRow
+            key={job.id}
+            job={job}
+            owner={owner}
+            busy={busy}
+            checked={selected.has(String(job.id))}
+            onToggle={() => toggle(String(job.id))}
+            onApply={() => applyOne(job)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-function ExportCsv() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function NewJobRow({
+  job,
+  owner,
+  busy,
+  checked,
+  onToggle,
+  onApply,
+}: {
+  job: Job;
+  owner: boolean;
+  busy: boolean;
+  checked: boolean;
+  onToggle: () => void;
+  onApply: () => void;
+}) {
+  const router = useRouter();
+  const m = displayMatch(job);
   return (
-    <>
-      <button
-        type="button"
-        className="btn"
-        disabled={busy}
-        title={error ?? "Download every job as CSV"}
-        onClick={async () => {
-          setBusy(true);
-          setError(null);
-          try {
-            await apiDownload("/export/jobs.csv", "careerpilot_jobs.csv");
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Export failed.");
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        {busy ? "Exporting…" : "Export CSV"}
-      </button>
-      {error && <span className="text-xs text-red">{error}</span>}
-    </>
+    <div
+      className="flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-panel2"
+      onClick={() => router.push(`/jobs/${job.id}`)}
+    >
+      <input
+        type="checkbox"
+        className="tap h-4 w-4 shrink-0 accent-[var(--accent)]"
+        aria-label={`Select ${job.company}`}
+        checked={checked}
+        onClick={(e) => e.stopPropagation()}
+        onChange={onToggle}
+      />
+      <div className="min-w-0 flex-1">
+        <Link
+          href={`/jobs/${job.id}`}
+          className="text-sm font-semibold hover:underline underline-offset-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {job.company}
+        </Link>
+        <div className="truncate text-xs text-dim">{job.role}</div>
+      </div>
+      <MatchGauge score={m.value} size={36} source={m.source} />
+      {owner && (
+        <button
+          type="button"
+          className="btn btn-primary shrink-0 px-3 py-1 text-xs"
+          disabled={busy}
+          title="Begin tailoring — the job moves to the Board's Tailored column"
+          onClick={(e) => {
+            e.stopPropagation();
+            onApply();
+          }}
+        >
+          Apply
+        </button>
+      )}
+    </div>
   );
 }
 
-/* ---- table view ---- */
+/* ---- add a job: URL-first, manual fallback ---- */
 
-type SortKey = "company" | "role" | "status" | "match" | "channel" | "added_at";
+function AddJob({ onAdded }: { onAdded: () => void }) {
+  const { success, error: toastError } = useToast();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [manual, setManual] = useState(false);
+  const [form, setForm] = useState({
+    url: "",
+    company: "",
+    role: "",
+    channel: "",
+    jd_text: "",
+  });
 
-const TABLE_COLS: { key: SortKey; label: string }[] = [
-  { key: "company", label: "Company" },
-  { key: "role", label: "Role" },
-  { key: "status", label: "Status" },
-  { key: "match", label: "Match" },
-  { key: "channel", label: "Channel" },
-  { key: "added_at", label: "Added" },
-];
-
-function compareJobs(a: Job, b: Job, key: SortKey): number {
-  if (key === "match")
-    return (displayMatch(a).value ?? -1) - (displayMatch(b).value ?? -1);
-  const av = String(a[key] ?? "").toLowerCase();
-  const bv = String(b[key] ?? "").toLowerCase();
-  return av.localeCompare(bv);
-}
-
-function JobsTable({ jobs }: { jobs: Job[] }) {
-  const router = useRouter();
-  const [sortKey, setSortKey] = useState<SortKey>("added_at");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-
-  function clickHeader(key: SortKey) {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "match" || key === "added_at" ? "desc" : "asc");
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const job = await api<{ enrichment?: string }>("/jobs", {
+        method: "POST",
+        body: form,
+      });
+      setForm({ url: "", company: "", role: "", channel: "", jd_text: "" });
+      onAdded();
+      if (job.enrichment && job.enrichment.includes("failed")) {
+        // keep the panel open so the note is seen: the job exists, but the
+        // JD needs a manual paste on its detail page
+        setNotice(job.enrichment);
+        setManual(false);
+      } else {
+        setOpen(false);
+      }
+      success("Job added");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add the job.");
+      toastError(err instanceof Error ? err.message : "Could not add the job.");
+    } finally {
+      setBusy(false);
     }
   }
 
-  const sorted = [...jobs].sort((a, b) => {
-    const c = compareJobs(a, b, sortKey);
-    return sortDir === "asc" ? c : -c;
-  });
-
   return (
-    <div className="panel overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-line">
-            {TABLE_COLS.map((col) => (
-              <th
-                key={col.key}
-                className="px-4 py-2.5 text-left"
-                aria-sort={
-                  sortKey === col.key
-                    ? sortDir === "asc"
-                      ? "ascending"
-                      : "descending"
-                    : undefined
-                }
-              >
-                <button
-                  type="button"
-                  className="eyebrow cursor-pointer transition-colors hover:!text-[var(--ink)]"
-                  onClick={() => clickHeader(col.key)}
-                >
-                  {col.label}
-                  {sortKey === col.key && (sortDir === "asc" ? " ▲" : " ▼")}
-                </button>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--line)]">
-          {sorted.map((job) => (
-            <tr
-              key={job.id}
-              className="cursor-pointer transition-colors hover:bg-panel2"
-              onClick={() => router.push(`/jobs/${job.id}`)}
+    <div className="relative">
+      <button type="button" className="btn" onClick={() => setOpen((v) => !v)}>
+        {open ? "Close" : "Add job"}
+      </button>
+      {open && (
+        <form
+          onSubmit={submit}
+          className="panel absolute right-0 z-10 mt-2 flex w-[min(36rem,88vw)] flex-col gap-3 p-4"
+        >
+          <label className="flex flex-col gap-1">
+            <span className="eyebrow">Posting URL</span>
+            <input
+              className="input"
+              type="url"
+              required
+              autoFocus
+              placeholder="https://…"
+              value={form.url}
+              onChange={(e) => setForm({ ...form, url: e.target.value })}
+            />
+          </label>
+          <p className="text-xs text-faint">
+            Company, role, and the job description are fetched from the page
+            automatically. Sites that block fetching (LinkedIn does) still get
+            added — you just paste the JD on the job page afterward.
+          </p>
+          {!manual && (
+            <button
+              type="button"
+              className="self-start text-xs text-faint underline-offset-2 hover:underline"
+              onClick={() => setManual(true)}
             >
-              <td className="px-4 py-2.5 font-semibold">
-                <Link
-                  href={`/jobs/${job.id}`}
-                  className="hover:text-accent"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {job.company}
-                </Link>
-              </td>
-              <td className="px-4 py-2.5 text-dim">{job.role}</td>
-              <td className="px-4 py-2.5">
-                <StatusChip status={job.status} />
-              </td>
-              <td className="px-4 py-2.5">
-                {(() => {
-                  const m = displayMatch(job);
-                  return <MatchGauge score={m.value} size={32} source={m.source} />;
-                })()}
-              </td>
-              <td className="px-4 py-2.5">
-                {job.channel ? (
-                  <span className="chip">{job.channel}</span>
-                ) : (
-                  <span className="text-faint">—</span>
-                )}
-              </td>
-              <td className="readout px-4 py-2.5 text-xs text-faint">
-                {fmtWhen(job.added_at)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              Enter details manually instead
+            </button>
+          )}
+          {manual && (
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="eyebrow">Company</span>
+                  <input
+                    className="input"
+                    value={form.company}
+                    onChange={(e) => setForm({ ...form, company: e.target.value })}
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="eyebrow">Role</span>
+                  <input
+                    className="input"
+                    value={form.role}
+                    onChange={(e) => setForm({ ...form, role: e.target.value })}
+                  />
+                </label>
+              </div>
+              <label className="flex flex-col gap-1">
+                <span className="eyebrow">Job description text</span>
+                <textarea
+                  className="textarea min-h-24"
+                  value={form.jd_text}
+                  onChange={(e) => setForm({ ...form, jd_text: e.target.value })}
+                />
+              </label>
+            </>
+          )}
+          {notice && <p className="text-sm text-amber">{notice}</p>}
+          {error && <p className="text-sm text-red">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-quiet" onClick={() => setOpen(false)}>
+              {notice ? "Done" : "Cancel"}
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? "Fetching…" : "Add job"}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
@@ -523,161 +643,7 @@ function AttentionRow({
   );
 }
 
-function JobCard({ job }: { job: Job }) {
-  const flagged = (job.missing_keywords ?? []).length;
-  return (
-    <Link
-      href={`/jobs/${job.id}`}
-      className="panel block p-3 transition-colors hover:border-[var(--accent)]"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">{job.company}</div>
-          <div className="truncate text-xs text-dim">{job.role}</div>
-        </div>
-        <MatchGauge {...(() => { const m = displayMatch(job); return { score: m.value, source: m.source }; })()} size={38} />
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1">
-        {job.ats && <span className="chip">{job.ats}</span>}
-        {job.channel && <span className="chip">{job.channel}</span>}
-        {flagged > 0 && (
-          <span className="chip chip-amber" title="Missing JD keywords — flagged, never added">
-            {flagged} flagged
-          </span>
-        )}
-      </div>
-      <div className="readout mt-2 text-[0.65rem] text-faint">
-        added {fmtWhen(job.added_at)}
-      </div>
-    </Link>
-  );
-}
-
-function AddJob({ onAdded }: { onAdded: () => void }) {
-  const { success, error: toastError } = useToast();
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [manual, setManual] = useState(false);
-  const [form, setForm] = useState({
-    url: "",
-    company: "",
-    role: "",
-    channel: "",
-    jd_text: "",
-  });
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const job = await api<{ enrichment?: string }>("/jobs", {
-        method: "POST",
-        body: form,
-      });
-      setForm({ url: "", company: "", role: "", channel: "", jd_text: "" });
-      onAdded();
-      if (job.enrichment && job.enrichment.includes("failed")) {
-        // keep the panel open so the note is seen: the job exists, but the
-        // JD needs a manual paste on its detail page
-        setNotice(job.enrichment);
-        setManual(false);
-      } else {
-        setOpen(false);
-      }
-      success("Job added");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add the job.");
-      toastError(err instanceof Error ? err.message : "Could not add the job.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="relative">
-      <button type="button" className="btn" onClick={() => setOpen((v) => !v)}>
-        {open ? "Close" : "Add job"}
-      </button>
-      {open && (
-        <form
-          onSubmit={submit}
-          className="panel absolute right-0 z-10 mt-2 flex w-[min(36rem,88vw)] flex-col gap-3 p-4"
-        >
-          <label className="flex flex-col gap-1">
-            <span className="eyebrow">Posting URL</span>
-            <input
-              className="input"
-              type="url"
-              required
-              autoFocus
-              placeholder="https://…"
-              value={form.url}
-              onChange={(e) => setForm({ ...form, url: e.target.value })}
-            />
-          </label>
-          <p className="text-xs text-faint">
-            Company, role, and the job description are fetched from the page
-            automatically. Sites that block fetching (LinkedIn does) still get
-            added — you just paste the JD on the job page afterward.
-          </p>
-          {!manual && (
-            <button
-              type="button"
-              className="self-start text-xs text-faint underline-offset-2 hover:underline"
-              onClick={() => setManual(true)}
-            >
-              Enter details manually instead
-            </button>
-          )}
-          {manual && (
-            <>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="flex flex-col gap-1">
-                  <span className="eyebrow">Company</span>
-                  <input
-                    className="input"
-                    value={form.company}
-                    onChange={(e) => setForm({ ...form, company: e.target.value })}
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="eyebrow">Role</span>
-                  <input
-                    className="input"
-                    value={form.role}
-                    onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  />
-                </label>
-              </div>
-              <label className="flex flex-col gap-1">
-                <span className="eyebrow">Job description text</span>
-                <textarea
-                  className="textarea min-h-24"
-                  value={form.jd_text}
-                  onChange={(e) => setForm({ ...form, jd_text: e.target.value })}
-                />
-              </label>
-            </>
-          )}
-          {notice && <p className="text-sm text-amber">{notice}</p>}
-          {error && <p className="text-sm text-red">{error}</p>}
-          <div className="flex justify-end gap-2">
-            <button type="button" className="btn btn-quiet" onClick={() => setOpen(false)}>
-              {notice ? "Done" : "Cancel"}
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? "Fetching…" : "Add job"}
-            </button>
-          </div>
-        </form>
-      )}
-    </div>
-  );
-}
+/* ---- questions for Dhiren ---- */
 
 function QuestionsPanel({
   questions,

@@ -38,7 +38,7 @@ class Job(Base):
     ats: Mapped[str] = mapped_column(String(64), default="")
     channel: Mapped[str] = mapped_column(String(32), default="unknown")
     jd_text: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(32), default="discovered")
+    status: Mapped[str] = mapped_column(String(32), default="new")
     match: Mapped[int | None] = mapped_column(Integer, nullable=True)
     llm_match: Mapped[int | None] = mapped_column(Integer, nullable=True)  # recruiter score
     llm_analysis: Mapped[str] = mapped_column(Text, default="")

@@ -75,7 +75,9 @@ export function EmptyState({ children }: { children: ReactNode }) {
 /* ---------- domain badges ---------- */
 
 const STATUS_TONE: Record<string, string> = {
+  new: "chip",
   discovered: "chip",
+  enriched: "chip",
   tailored: "chip chip-cyan",
   applied: "chip chip-accent",
   interview: "chip chip-green",

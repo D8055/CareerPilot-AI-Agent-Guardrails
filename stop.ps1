@@ -11,5 +11,13 @@ foreach ($port in 8000, 3000) {
             }
         }
 }
+# the runner has no port — find it by command line
+Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match "runner\.py" } | ForEach-Object {
+        Write-Host "stopping runner (pid $($_.ProcessId))"
+        Stop-Process -Id $_.ProcessId -Force
+        $script:stopped++
+    }
+
 if ($stopped -eq 0) { Write-Host "nothing was running." }
 else { Write-Host "done - $stopped process(es) stopped." }

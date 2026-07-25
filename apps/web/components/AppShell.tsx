@@ -11,9 +11,9 @@ const emptySubscribe = () => () => {};
 const nullSnapshot = () => null;
 
 const NAV = [
-  { href: "/", label: "Board" },
+  { href: "/", label: "New Jobs" },
+  { href: "/board", label: "Board" },
   { href: "/career", label: "Career" },
-  { href: "/evals", label: "Evals" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -126,10 +126,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
           <nav className="flex items-center gap-4 overflow-x-auto sm:gap-5">
             {NAV.map((item) => {
+              // "/" is New Jobs (exact match only); the Board owns /board
+              // and every /jobs/* detail page.
               const active =
                 item.href === "/"
-                  ? pathname === "/" || pathname.startsWith("/jobs")
-                  : pathname.startsWith(item.href);
+                  ? pathname === "/"
+                  : item.href === "/board"
+                    ? pathname.startsWith("/board") || pathname.startsWith("/jobs")
+                    : pathname.startsWith(item.href);
               return (
                 <Link
                   key={item.href}

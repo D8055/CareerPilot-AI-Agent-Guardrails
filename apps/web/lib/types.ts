@@ -1,5 +1,22 @@
 export type Role = "owner" | "viewer";
 
+/** Jobs not yet in the pipeline live on the New Jobs page. Status defaults
+ * to "new"; discovered/enriched are legacy spellings of the same bucket. */
+export const NEW_BUCKET = ["new", "discovered", "enriched"] as const;
+
+/** Board columns, in display order. Rejected renders last and muted. */
+export const PIPELINE_STATUSES = [
+  "tailored",
+  "applied",
+  "interview",
+  "offer",
+  "rejected",
+] as const;
+
+export function isNewJob(job: { status: string }): boolean {
+  return (NEW_BUCKET as readonly string[]).includes(job.status);
+}
+
 export interface Job {
   id: number | string;
   url: string;
@@ -173,13 +190,6 @@ export interface AnswerEntry {
   answer: string;
   source: "learned" | "manual";
   uses: number;
-}
-
-export interface EvalRun {
-  id: number | string;
-  matrix_key: string;
-  metrics: Record<string, number | string | null>;
-  ts: string;
 }
 
 export type BlockerStatus = "waiting_on_dhiren" | "resolved" | "deferred";

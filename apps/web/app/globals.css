@@ -2,49 +2,53 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ---- CareerPilot tokens: "night approach" instrument panel ----
-   Dark = night flight deck (default when system prefers dark).
-   Light = daylight chart paper: cool, inky, no cream.
-   Amber is semantic: it always means "needs a human". Magenta is the
-   course line: owner actions, active nav, focus. */
+/* ---- CareerPilot tokens: "Oreo" ----
+   Dark = the cookie: near-black warm charcoal surfaces, cream ink and
+   cream accents (btn-primary is cream with near-black text).
+   Light = the cream: cream background, off-white panels, near-black ink
+   and near-black accents. Amber stays semantic in both modes: it always
+   means "needs a human". Green/red/cyan keep their meanings, warmed to
+   sit inside the cookie palette.
+   Contrast (WCAG 1.4.3, computed): --ink-faint is 5.09:1 on the light
+   --bg and 6.09:1 on the dark --bg; every other text token is higher. */
 
 :root {
   color-scheme: light;
-  --bg: #edf0f5;
-  --panel: #fbfcfe;
-  --panel-2: #f0f3f8;
-  --line: #d5dce8;
-  --line-strong: #b4bfd2;
-  --ink: #16203a;
-  --ink-dim: #4e5a74;
-  /* faint darkened to meet WCAG 1.4.3 (4.5:1 on --bg); still the lightest text */
-  --ink-faint: #5c6880;
-  --accent: #a22a92;
-  --accent-hover: #86217a;
-  --cyan: #0b7285;
-  --amber: #8a5b04;
-  --green: #1a7f4e;
-  --red: #b3424e;
-  --shadow: 0 1px 2px rgb(22 32 58 / 0.06), 0 4px 16px rgb(22 32 58 / 0.05);
+  --bg: #f3eee4;
+  --panel: #fdfbf5;
+  --panel-2: #ece5d6;
+  --line: #ddd4c2;
+  --line-strong: #c2b6a0;
+  --ink: #191512;
+  --ink-dim: #574e42;
+  /* faint tuned to meet WCAG 1.4.3 (4.5:1 on --bg and --panel-2) */
+  --ink-faint: #6d6355;
+  --accent: #221d18;
+  --accent-hover: #3a322a;
+  --cyan: #206b60;
+  --amber: #875a0b;
+  --green: #3f6b34;
+  --red: #a2483e;
+  --shadow: 0 1px 2px rgb(25 21 18 / 0.06), 0 4px 16px rgb(25 21 18 / 0.05);
 }
 
 .dark {
   color-scheme: dark;
-  --bg: #0b0f17;
-  --panel: #121826;
-  --panel-2: #182034;
-  --line: #222c44;
-  --line-strong: #33405f;
-  --ink: #e7ecf5;
-  --ink-dim: #97a2ba;
-  /* faint lightened to meet WCAG 1.4.3 (4.5:1 on dark --bg) */
-  --ink-faint: #737f9c;
-  --accent: #e07bd4;
-  --accent-hover: #eb96e0;
-  --cyan: #7dd6e8;
-  --amber: #e7b04e;
-  --green: #66d19a;
-  --red: #e9808a;
+  --bg: #100e0c;
+  --panel: #1a1714;
+  --panel-2: #221e1a;
+  --line: #2b2620;
+  --line-strong: #3f372d;
+  --ink: #f3ede2;
+  --ink-dim: #c4b8a4;
+  /* faint tuned to meet WCAG 1.4.3 (4.5:1 on dark --bg and --panel-2) */
+  --ink-faint: #9c8f7d;
+  --accent: #e9dfc9;
+  --accent-hover: #f7f0de;
+  --cyan: #8fc7b6;
+  --amber: #e0b45c;
+  --green: #9fbf8f;
+  --red: #e59a8e;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 24px rgb(0 0 0 / 0.25);
 }
 
@@ -157,21 +161,17 @@ body {
   min-width: 1.75rem;
   justify-content: center;
 }
+/* Oreo primary: cream fill/near-black text in dark, inverted in light.
+   color: var(--bg) is the counter-surface in both modes. */
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--bg);
 }
-.dark .btn-primary {
-  color: #10131c;
-}
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
   color: var(--bg);
-}
-.dark .btn-primary:hover:not(:disabled) {
-  color: #10131c;
 }
 .btn-danger {
   background: var(--red);
@@ -179,7 +179,7 @@ body {
   color: var(--bg);
 }
 .dark .btn-danger {
-  color: #10131c;
+  color: var(--bg);
 }
 .btn-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--red) 82%, black);
@@ -325,9 +325,6 @@ body {
   font-weight: 600;
   font-size: 0.85rem;
 }
-.dark .skip-link {
-  color: #10131c;
-}
 .skip-link:focus {
   transform: translateY(0);
 }
@@ -341,11 +338,25 @@ body {
   animation: cp-toast-in 160ms ease-out;
 }
 
+/* bulk bar (New Jobs) slides in with the same subtle rise */
+.slide-in {
+  animation: cp-toast-in 160ms ease-out;
+}
+
+/* kanban column highlight while a card is dragged over it */
+.drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pulse {
     animation: none;
   }
-  .toast {
+  .toast,
+  .slide-in {
     animation: none;
   }
   * {

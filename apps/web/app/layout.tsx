@@ -22,7 +22,7 @@ const grotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: "CareerPilot",
-  description: "Flight deck for the job search: pipeline, tailoring, evidence, evals.",
+  description: "Flight deck for the job search: new jobs, pipeline board, tailoring, evidence.",
 };
 
 const themeScript = `(function(){try{var s=localStorage.getItem("cp-theme");var d=s?s==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d);}catch(e){}})();`;

@@ -25,7 +25,7 @@ import { useToast } from "@/components/Toast";
 import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 const STATUSES = [
-  "discovered",
+  "new",
   "tailored",
   "applied",
   "interview",
@@ -95,7 +95,7 @@ export default function JobPage() {
                 rel="noreferrer"
                 className="text-xs text-accent underline underline-offset-2"
               >
-                View posting ↗
+                View posting
               </a>
             )}
           </div>

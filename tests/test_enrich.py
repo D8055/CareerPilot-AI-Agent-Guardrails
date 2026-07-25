@@ -57,7 +57,7 @@ def test_add_job_autoenriches(client, owner_headers, monkeypatch):
     job = r.json()
     assert job["company"] == "Acme Robotics"
     assert job["role"] == "Software Engineer Intern"
-    assert job["status"] == "enriched"
+    assert job["status"] == "new"        # stays in New Jobs until Apply
     assert "auto-enriched" in job["enrichment"]
     detail = client.get(f"/jobs/{job['id']}", headers=owner_headers).json()
     assert "React" in detail["jd_text"]
@@ -72,7 +72,7 @@ def test_add_job_survives_blocked_fetch(client, owner_headers, monkeypatch):
                     headers=owner_headers)
     assert r.status_code == 201
     job = r.json()
-    assert job["status"] == "discovered"           # created anyway
+    assert job["status"] == "new"                  # created anyway
     assert "blocked" in job["enrichment"]
     # owner keeps their own input: nothing overwritten
     r2 = client.post("/jobs", json={
@@ -88,7 +88,7 @@ def test_reenrich_endpoint(client, owner_headers, monkeypatch):
     monkeypatch.setattr(enrich, "fetch_html", lambda url: LD_PAGE)
     r = client.post(f"/jobs/{job['id']}/enrich", headers=owner_headers)
     assert r.status_code == 200
-    assert r.json()["status"] == "enriched"
+    assert r.json()["status"] == "new"   # enrichment never advances the stage
 
 
 def test_jsonld_graph_and_list_shapes():

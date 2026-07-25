@@ -51,6 +51,18 @@ if (Test-Port 3000) {
     Write-Host "  Web starting (minimized window: npm)..."
 }
 
+# ---- Runner (recruiter quality passes via the owner's Claude login) ----
+$runnerUp = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match "runner\.py" }
+if ($runnerUp) {
+    Write-Host "  Runner already running - leaving it." -ForegroundColor Yellow
+} else {
+    Start-Process -FilePath "$root\.venv\Scripts\python.exe" `
+        -ArgumentList "apps\runner\runner.py" `
+        -WorkingDirectory $root -WindowStyle Minimized
+    Write-Host "  Runner starting (recruiter reviews use your Claude sign-in)..."
+}
+
 $apiOk = Wait-Url "http://127.0.0.1:8000/health" "API"
 $webOk = Wait-Url "http://localhost:3000/login" "Web"
 
