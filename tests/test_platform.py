@@ -58,6 +58,25 @@ def test_job_pipeline_tailor_and_quality_pass(client, owner_headers, runner_head
     assert plan["quality_pass"] == "done"
 
 
+def test_quality_pass_sets_recruiter_match(client, owner_headers, runner_headers):
+    job = client.post("/jobs", json={"company": "RecruiterCo", "role": "SWE"},
+                      headers=owner_headers).json()
+    client.post(f"/jobs/{job['id']}/tailor",
+                json={"jd_text": "React SQL Python Docker"}, headers=owner_headers)
+    lease = client.post("/intelligence/lease", headers=runner_headers).json()
+    iid = lease["job"]["id"]
+    # runner reports the recruiter analysis + score (no summary rewrite here)
+    client.post(f"/intelligence/{iid}/complete", headers=runner_headers, json={
+        "status": "done",
+        "result": {"llm_match": 84,
+                   "analysis": "SCORE: 84\nMissing: kafka. Red flags: none major."}})
+    detail = client.get(f"/jobs/{job['id']}", headers=owner_headers).json()
+    assert detail["llm_match"] == 84
+    assert "SCORE: 84" in detail["llm_analysis"]
+    # deterministic match is still present and separate
+    assert isinstance(detail["match"], int)
+
+
 def test_blockers_waiting_state(client, owner_headers, viewer_headers):
     rows = client.get("/status/blockers", headers=viewer_headers).json()
     codes = {b["code"]: b for b in rows}

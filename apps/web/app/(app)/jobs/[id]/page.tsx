@@ -11,6 +11,7 @@ import type {
   ResumePdfStatus,
   TailorResult,
 } from "@/lib/types";
+import { displayMatch } from "@/lib/types";
 import {
   ErrorNote,
   Eyebrow,
@@ -64,7 +65,12 @@ export default function JobPage() {
     String(b.created_at).localeCompare(String(a.created_at))
   )[0];
 
-  const matchScore = tailorResult?.match_score ?? j.match;
+  // prefer the recruiter (LLM) score; else the freshest keyword score
+  const dm = displayMatch(j);
+  const matchScore = dm.source === "recruiter" ? dm.value
+    : (tailorResult?.match_score ?? dm.value);
+  const matchSource: "recruiter" | "keyword" =
+    dm.source === "recruiter" ? "recruiter" : "keyword";
   const matched = tailorResult?.matched_keywords ?? j.matched_keywords ?? [];
   const missing = tailorResult?.missing_keywords ?? j.missing_keywords ?? [];
 
@@ -95,10 +101,22 @@ export default function JobPage() {
           </div>
         </div>
         <div className="flex flex-col items-center gap-1">
-          <MatchGauge score={matchScore} size={72} />
-          <Eyebrow>match</Eyebrow>
+          <MatchGauge score={matchScore} size={72} source={matchSource} />
+          <Eyebrow>{matchSource === "recruiter" ? "recruiter match" : "keyword match"}</Eyebrow>
         </div>
       </header>
+
+      {j.llm_analysis && (
+        <section className="panel p-5">
+          <div className="mb-2 flex items-center gap-2">
+            <h2 className="display text-base font-semibold">Recruiter review</h2>
+            <span className="chip chip-accent text-[0.65rem]">from your quality pass</span>
+          </div>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-dim">
+            {j.llm_analysis}
+          </p>
+        </section>
+      )}
 
       {owner && <StatusEditor id={String(id)} current={j.status} onSaved={() => job.refetch()} />}
 

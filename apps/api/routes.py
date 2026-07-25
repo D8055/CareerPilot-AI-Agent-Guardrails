@@ -67,7 +67,8 @@ class StatusBody(BaseModel):
 def _job_dict(j: Job) -> dict:
     return {"id": j.id, "url": j.url, "company": j.company, "role": j.role,
             "ats": j.ats, "channel": j.channel, "status": j.status,
-            "match": j.match, "matched_keywords": j.matched_keywords or [],
+            "match": j.match, "llm_match": j.llm_match,
+            "matched_keywords": j.matched_keywords or [],
             "missing_keywords": j.missing_keywords or [],
             "added_at": j.added_at.isoformat() if j.added_at else None}
 
@@ -151,6 +152,7 @@ def get_job(job_id: int, user: dict = Depends(current_user),
                        .order_by(Plan.created_at.desc())).scalars()
     d = _job_dict(job)
     d["jd_text"] = job.jd_text
+    d["llm_analysis"] = job.llm_analysis
     d["status_events"] = [{"status": e.status, "note": e.note,
                            "ts": e.ts.isoformat()} for e in events]
     d["plans"] = [{"id": p.id, "created_by": p.created_by,
@@ -624,6 +626,13 @@ async def complete(iid: int, body: CompleteBody,
     # a clean tailor_quality pass upgrades the plan it reviewed — but the
     # honesty guard disposes of whatever the LLM proposed, no exceptions
     if body.status == "done" and job.kind == "tailor_quality":
+        # the recruiter's match score + analysis become the displayed match
+        target = db.get(Job, (job.payload or {}).get("job_id", -1))
+        if target:
+            if isinstance(body.result.get("llm_match"), int):
+                target.llm_match = max(0, min(100, body.result["llm_match"]))
+            if body.result.get("analysis"):
+                target.llm_analysis = body.result["analysis"]
         plan = db.get(Plan, (job.payload or {}).get("plan_id", -1))
         if plan:
             new_summary = body.result.get("summary_text", "")

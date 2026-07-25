@@ -8,9 +8,23 @@ export interface Job {
   ats: string | null;
   channel: string | null;
   status: string;
-  match: number | null;
+  match: number | null;        // deterministic keyword-coverage score
+  llm_match: number | null;    // recruiter score from a quality pass (preferred)
   missing_keywords: string[];
   added_at: string;
+}
+
+/** The score to show: the recruiter's if a quality pass produced one, else
+ * the deterministic keyword score. Returns which source it came from. */
+export function displayMatch(job: {
+  match: number | null;
+  llm_match: number | null;
+}): { value: number | null; source: "recruiter" | "keyword" | null } {
+  if (typeof job.llm_match === "number")
+    return { value: job.llm_match, source: "recruiter" };
+  if (typeof job.match === "number")
+    return { value: job.match, source: "keyword" };
+  return { value: null, source: null };
 }
 
 export interface StatusEvent {
@@ -32,6 +46,7 @@ export interface JobDetail extends Job {
   status_events: StatusEvent[];
   plans: PlanMeta[];
   matched_keywords?: string[];
+  llm_analysis?: string;
 }
 
 export interface TailorResult {

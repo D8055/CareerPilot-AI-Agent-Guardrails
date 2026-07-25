@@ -75,7 +75,9 @@ def make_graph(llm):
             "Analyze this resume against this job description and give me:\n"
             "1. A match score out of 100.\n"
             "2. The top 5 missing keywords.\n"
-            "3. The 3 red flags a hiring manager would spot in under 10 seconds."
+            "3. The 3 red flags a hiring manager would spot in under 10 seconds.\n\n"
+            "Start your reply with a single line 'SCORE: N' where N is the match "
+            "score as an integer from 0 to 100, then the rest of the analysis."
         )
         try:
             return {**state, "analysis": llm(prompt, system).strip()}
@@ -188,7 +190,19 @@ def run_quality_pass(llm, company: str, jd_text: str, evidence: list[dict],
         return {"error": out["error"]}
     return {
         "analysis": out.get("analysis", ""),
+        "llm_match": _parse_score(out.get("analysis", "")),
         "summary_text": out.get("rewritten_summary", ""),
         "rewritten_experience": out.get("rewritten_experience", ""),
         "ats_notes": out.get("ats_notes", ""),
     }
+
+
+def _parse_score(analysis: str) -> int | None:
+    """Pull the recruiter's 0-100 match score from the analysis text."""
+    import re
+    m = re.search(r"SCORE:\s*(\d{1,3})", analysis, re.I)
+    if not m:
+        m = re.search(r"(\d{1,3})\s*/\s*100", analysis)
+    if not m:
+        return None
+    return max(0, min(100, int(m.group(1))))

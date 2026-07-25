@@ -134,9 +134,11 @@ export function matchTone(score: number): string {
 export function MatchGauge({
   score,
   size = 40,
+  source,
 }: {
   score: number | null | undefined;
   size?: number;
+  source?: "recruiter" | "keyword" | null;
 }) {
   const s = typeof score === "number" ? Math.max(0, Math.min(100, score)) : null;
   const r = 15.5;
@@ -145,12 +147,14 @@ export function MatchGauge({
   const sweep = 0.75 * c;
   const filled = s === null ? 0 : (s / 100) * sweep;
   const tone = s === null ? "var(--ink-faint)" : matchTone(s);
+  const kind = source === "recruiter" ? "Recruiter match"
+    : source === "keyword" ? "Keyword match" : "Match";
   return (
     <div
       className="relative shrink-0"
       style={{ width: size, height: size }}
-      title={s === null ? "No match score yet" : `Match ${s}%`}
-      aria-label={s === null ? "No match score yet" : `Match ${s} percent`}
+      title={s === null ? "No match score yet" : `${kind} ${s}%`}
+      aria-label={s === null ? "No match score yet" : `${kind} ${s} percent`}
       role="img"
     >
       <svg viewBox="0 0 40 40" width={size} height={size}>

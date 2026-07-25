@@ -13,6 +13,7 @@ import type {
   Runner,
   Stats,
 } from "@/lib/types";
+import { displayMatch } from "@/lib/types";
 import {
   EmptyState,
   ErrorNote,
@@ -280,7 +281,8 @@ const TABLE_COLS: { key: SortKey; label: string }[] = [
 ];
 
 function compareJobs(a: Job, b: Job, key: SortKey): number {
-  if (key === "match") return (a.match ?? -1) - (b.match ?? -1);
+  if (key === "match")
+    return (displayMatch(a).value ?? -1) - (displayMatch(b).value ?? -1);
   const av = String(a[key] ?? "").toLowerCase();
   const bv = String(b[key] ?? "").toLowerCase();
   return av.localeCompare(bv);
@@ -355,7 +357,10 @@ function JobsTable({ jobs }: { jobs: Job[] }) {
                 <StatusChip status={job.status} />
               </td>
               <td className="px-4 py-2.5">
-                <MatchGauge score={job.match} size={32} />
+                {(() => {
+                  const m = displayMatch(job);
+                  return <MatchGauge score={m.value} size={32} source={m.source} />;
+                })()}
               </td>
               <td className="px-4 py-2.5">
                 {job.channel ? (
@@ -530,7 +535,7 @@ function JobCard({ job }: { job: Job }) {
           <div className="truncate text-sm font-semibold">{job.company}</div>
           <div className="truncate text-xs text-dim">{job.role}</div>
         </div>
-        <MatchGauge score={job.match} size={38} />
+        <MatchGauge {...(() => { const m = displayMatch(job); return { score: m.value, source: m.source }; })()} size={38} />
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1">
         {job.ats && <span className="chip">{job.ats}</span>}

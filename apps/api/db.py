@@ -40,6 +40,8 @@ class Job(Base):
     jd_text: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="discovered")
     match: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    llm_match: Mapped[int | None] = mapped_column(Integer, nullable=True)  # recruiter score
+    llm_analysis: Mapped[str] = mapped_column(Text, default="")
     matched_keywords: Mapped[list] = mapped_column(JSON, default=list)
     missing_keywords: Mapped[list] = mapped_column(JSON, default=list)
     added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -190,6 +192,8 @@ _MIGRATIONS = [
     ("questions", "kind", "ALTER TABLE questions ADD COLUMN kind VARCHAR(16) DEFAULT 'keyword'"),
     ("artifacts", "plan_id", "ALTER TABLE artifacts ADD COLUMN plan_id INTEGER"),
     ("artifacts", "meta", "ALTER TABLE artifacts ADD COLUMN meta JSON"),
+    ("jobs", "llm_match", "ALTER TABLE jobs ADD COLUMN llm_match INTEGER"),
+    ("jobs", "llm_analysis", "ALTER TABLE jobs ADD COLUMN llm_analysis TEXT DEFAULT ''"),
 ]
 
 
