@@ -78,6 +78,7 @@ const STATUS_TONE: Record<string, string> = {
   new: "chip",
   discovered: "chip",
   enriched: "chip",
+  tailoring: "chip chip-accent",
   tailored: "chip chip-cyan",
   applied: "chip chip-accent",
   interview: "chip chip-green",
@@ -149,8 +150,8 @@ export function MatchGauge({
   const sweep = 0.75 * c;
   const filled = s === null ? 0 : (s / 100) * sweep;
   const tone = s === null ? "var(--ink-faint)" : matchTone(s);
-  const kind = source === "recruiter" ? "Recruiter match"
-    : source === "keyword" ? "Keyword match" : "Match";
+  const kind = source === "recruiter" ? "AI recruiter match"
+    : source === "keyword" ? "Script match (Claude not hooked up)" : "Match";
   return (
     <div
       className="relative shrink-0"

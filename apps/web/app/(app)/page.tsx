@@ -191,8 +191,14 @@ function NewJobsList({
   async function applyOne(job: Job) {
     setBusy(true);
     try {
-      await api(`/jobs/${job.id}/tailor`, { method: "POST" });
-      success("Tailoring started — moved to Board");
+      const r = await api<{ claude_connected?: boolean }>(
+        `/jobs/${job.id}/tailor`, { method: "POST" });
+      if (r.claude_connected) {
+        success("Sent to Claude for tailoring — moved to Board");
+      } else {
+        toastError("Claude isn't hooked up — script fallback tailored it. " +
+                   "Claude will redo it when connected.");
+      }
       onChanged();
     } catch (err) {
       // usually a 400: no JD yet — the row links to the job page to paste it

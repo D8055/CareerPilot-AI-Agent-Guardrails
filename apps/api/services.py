@@ -10,7 +10,7 @@ from careerpilot_shared import (build_pool_plan, check_honesty, extract_jd_terms
                                 load_pool, match_score, validate_pool_plan)
 
 from db import (Answer, Blocker, CareerItem, EvalRun, IntelligenceJob, Job,
-                Outbox, Plan, Question, RunnerInfo, StatusEvent, utcnow)
+                Outbox, Plan, Question, RunnerInfo, StatusEvent)
 from rag import cosine, get_embedder
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -173,9 +173,130 @@ def create_match_questions(db: Session, job: Job, missing: list[str],
     return made
 
 
+def pool_menu(pool: dict) -> dict:
+    """The compact selection menu the AI tailor chooses from: every verified
+    bullet by id, with the selection bounds the validator will enforce."""
+    return {
+        "summary_rules": "25-80 words, one paragraph, only facts present in "
+                         "this menu, no hyphens, no em dashes",
+        "experience": [{
+            "id": r["id"], "org": r["org"], "title": r["title"],
+            "select_min": r["select"]["min"], "select_max": r["select"]["max"],
+            "bullets": [{"id": b["id"], "text": b["text"]} for b in r["bullets"]],
+        } for r in pool["experience"]],
+        "projects_pick_exactly": 3,
+        "projects": [{
+            "id": p["id"], "name": p["name"],
+            "select_min": p.get("select", {}).get("min", 2),
+            "select_max": p.get("select", {}).get("max", 2),
+            "bullets": [{"id": b["id"], "text": b["text"]} for b in p["bullets"]],
+        } for p in pool["projects"]],
+        "skills": [{"label": g["label"], "items": g["items"]} for g in pool["skills"]],
+    }
+
+
+def claude_connected(db: Session) -> bool:
+    """Is a runner heartbeating? That IS 'Claude is hooked up'."""
+    from db import age_seconds
+    return any(age_seconds(r.last_heartbeat) < 120
+               for r in db.execute(select(RunnerInfo)).scalars())
+
+
+def request_ai_tailor(db: Session, job: Job) -> dict:
+    """Apply. Tailoring is AI-first: the full-tailor pass is ALWAYS queued for
+    Claude. If Claude is hooked up (runner heartbeating) the job waits in
+    'tailoring' for the AI result. If not, the script fallback tailors it
+    immediately — clearly labeled as such — and Claude's pass upgrades it
+    whenever the runner comes online. The keyword machinery runs internally
+    to raise confirmation questions; its number is only ever shown as the
+    labeled script fallback."""
+    pool = get_pool()
+    extra = owner_corpus(db)
+    matched, missing = extract_jd_terms(job.jd_text, pool, extra)
+    internal_score = match_score(matched, missing)
+    job.match = internal_score
+    job.matched_keywords = matched
+    job.missing_keywords = missing
+    connected = claude_connected(db)
+
+    db.flush()
+    db.add(IntelligenceJob(kind="tailor_full", payload={"job_id": job.id}))
+    questions_created = create_match_questions(db, job, missing, internal_score)
+
+    if connected:
+        job.status = "tailoring"
+        db.add(StatusEvent(job_id=job.id, status="tailoring",
+                           note="sent to Claude for tailoring"))
+    else:
+        # script fallback: a valid resume NOW, upgraded by Claude later
+        summary = (pool.get("meta") or {}).get("fallback_summary", "")
+        plan = build_pool_plan(pool, matched, summary_text=summary)
+        violations = validate_pool_plan(pool, plan, extra)
+        if violations:
+            raise ValueError(f"fallback plan failed validation: {violations}")
+        db.add(Plan(job_id=job.id, plan_json=plan, honesty_report=[],
+                    created_by="deterministic", quality_pass="pending"))
+        job.status = "tailored"
+        db.add(StatusEvent(job_id=job.id, status="tailored",
+                           note="script fallback (Claude not hooked up); AI "
+                                "pass queued for when it connects"))
+    db.add(Outbox(topic="application-events",
+                  payload={"event": "tailoring", "job_id": job.id}))
+    db.commit()
+    return {"job_id": job.id, "status": job.status,
+            "claude_connected": connected, "queued": True,
+            "questions_created": questions_created}
+
+
+def normalize_ai_plan(pool: dict, plan: dict) -> dict:
+    """Fix formatting-only deviations in the AI's plan: group and role ORDER
+    are fixed by the pool, so realigning them is normalization, not
+    authorship. Content (which items, which bullets, the summary) is never
+    touched — the validator judges that."""
+    by_label = {g.get("label"): g for g in plan.get("skills", [])
+                if isinstance(g, dict)}
+    if set(by_label) == {g["label"] for g in pool["skills"]}:
+        plan["skills"] = [by_label[g["label"]] for g in pool["skills"]]
+    by_id = {e.get("id"): e for e in plan.get("experience", [])
+             if isinstance(e, dict)}
+    if set(by_id) == {r["id"] for r in pool["experience"]}:
+        plan["experience"] = [by_id[r["id"]] for r in pool["experience"]]
+    plan.setdefault("summary_bold", "")
+    return plan
+
+
+def accept_ai_plan(db: Session, job: Job, plan: dict, llm_match_score,
+                   analysis: str) -> list[str]:
+    """Validate the AI's complete plan (selection-only, honesty-clean). Valid ->
+    plan stored, job tailored, AI score live. Returns violations (empty = ok)."""
+    pool = get_pool()
+    extra = owner_corpus(db)
+    plan = normalize_ai_plan(pool, plan)
+    violations = validate_pool_plan(pool, plan, extra)
+    if violations:
+        return violations
+    row = Plan(job_id=job.id, plan_json=plan, honesty_report=[],
+               created_by="agent", quality_pass="done")
+    db.add(row)
+    if isinstance(llm_match_score, int):
+        job.llm_match = max(0, min(100, llm_match_score))
+    if analysis:
+        job.llm_analysis = analysis
+    # never regress a job the owner already moved forward (applied etc.)
+    if job.status in ("tailoring", "tailored", "new", "discovered", "enriched"):
+        job.status = "tailored"
+    db.add(StatusEvent(job_id=job.id, status="tailored",
+                       note="AI tailoring accepted by the honesty guard"))
+    db.add(Outbox(topic="application-events",
+                  payload={"event": "tailored", "job_id": job.id,
+                           "match": job.llm_match}))
+    db.commit()
+    return []
+
+
 def tailor_and_store(db: Session, job: Job) -> dict:
-    """Deterministic fast path: instant plan + honesty validation, then a
-    quality-pass intelligence job is queued for the runner."""
+    """Deterministic engine — retained ONLY as the CI/test fixture and the
+    stateless dev endpoint. Not on any user path (tailoring is purely AI)."""
     pool = get_pool()
     extra = owner_corpus(db)
     matched, missing = (extract_jd_terms(job.jd_text, pool, extra)
@@ -422,9 +543,10 @@ def attention(db: Session) -> dict:
         if note:
             items.append({"type": "enrich_failed", "job_id": job.id,
                           "company": job.company or job.url, "detail": note})
+    from db import age_seconds
     runners_online = sum(
         1 for r in db.execute(select(RunnerInfo)).scalars()
-        if (utcnow() - r.last_heartbeat).total_seconds() < 120)
+        if age_seconds(r.last_heartbeat) < 120)
     counts = {
         "open_questions": db.query(Question).filter_by(status="open").count(),
         "failed_items": len(items),

@@ -19,7 +19,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from claude_llm import RunnerLLMError, ask_claude  # noqa: E402
-from graph import run_quality_pass  # noqa: E402
+from graph import run_full_tailor, run_quality_pass  # noqa: E402
 
 API = os.environ.get("CAREERPILOT_API", "http://127.0.0.1:8000")
 HEADERS = {
@@ -32,6 +32,24 @@ IDLE_SLEEP = (20, 40)   # jittered seconds between empty polls — polite pacing
 
 def llm(prompt: str, system: str) -> str:
     return ask_claude(prompt, system)
+
+
+def handle_tailor_full(client: httpx.Client, payload: dict) -> dict:
+    """Purely-AI tailoring: Claude authors the whole plan from the menu; the
+    API's validator drives the repair loop before submission."""
+    job = client.get(f"{API}/jobs/{payload['job_id']}", headers=HEADERS).json()
+    menu = client.get(f"{API}/tailor/menu", headers=HEADERS).json()
+    answers = client.get(f"{API}/career", headers=HEADERS).json()
+    confirmations = " ".join(a["text"] for a in answers
+                             if a.get("source") == "owner")
+
+    def validate(plan: dict) -> list:
+        r = client.post(f"{API}/tailor/validate", headers=HEADERS,
+                        json={"plan": plan})
+        return r.json().get("violations", ["validator unreachable"])
+
+    return run_full_tailor(llm, job.get("company", ""), job.get("jd_text", ""),
+                           menu, confirmations, validate=validate)
 
 
 def handle_tailor_quality(client: httpx.Client, payload: dict) -> dict:
@@ -58,7 +76,9 @@ def poll_once(client: httpx.Client) -> bool:
         return False
     print(f"[runner] leased #{job['id']} ({job['kind']})")
     try:
-        if job["kind"] == "tailor_quality":
+        if job["kind"] == "tailor_full":
+            result = handle_tailor_full(client, job["payload"])
+        elif job["kind"] == "tailor_quality":
             result = handle_tailor_quality(client, job["payload"])
         else:
             result = {"error": f"unknown kind {job['kind']}"}
@@ -72,6 +92,14 @@ def poll_once(client: httpx.Client) -> bool:
 
 
 def main() -> None:
+    # singleton lock: a second runner would double every Claude call. Binding
+    # a localhost port is race-proof no matter how we get launched.
+    lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        lock.bind(("127.0.0.1", 8901))
+    except OSError:
+        print("[runner] another runner is already running - exiting")
+        return
     once = "--once" in sys.argv
     with httpx.Client(timeout=120) as client:
         while True:

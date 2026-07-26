@@ -207,6 +207,8 @@ class JDBody(BaseModel):
 async def tailor_job(job_id: int, body: JDBody | None = None,
                      user: dict = Depends(require_owner),
                      db: Session = Depends(get_db)):
+    """Apply: queue the job for AI tailoring (the runner's Claude pass picks
+    the bullets, writes the summary, and scores the match)."""
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(404, "no such job")
@@ -214,10 +216,32 @@ async def tailor_job(job_id: int, body: JDBody | None = None,
         job.jd_text = body.jd_text
     if not job.jd_text:
         raise HTTPException(400, "job has no JD text")
-    report = services.tailor_and_store(db, job)
-    await manager.broadcast({"type": "tailored", "job_id": job_id,
-                             "match": report["match_score"]})
+    report = services.request_ai_tailor(db, job)
+    await manager.broadcast({"type": "tailoring", "job_id": job_id})
     return report
+
+
+@router.get("/tailor/menu")
+def tailor_menu(user: dict = Depends(current_user)):
+    """The verified selection menu the AI tailor chooses from (runner uses
+    this; owner/viewer may inspect it)."""
+    return services.pool_menu(services.get_pool())
+
+
+class ValidateBody(BaseModel):
+    plan: dict
+
+
+@router.post("/tailor/validate")
+def validate_plan(body: ValidateBody, user: dict = Depends(current_user),
+                  db: Session = Depends(get_db)):
+    """Dry-run the honesty guard on a candidate plan (the runner's repair
+    loop uses this before submitting)."""
+    from careerpilot_shared import validate_pool_plan
+    pool = services.get_pool()
+    plan = services.normalize_ai_plan(pool, dict(body.plan))
+    return {"violations": validate_pool_plan(pool, plan,
+                                             services.owner_corpus(db))}
 
 
 @router.get("/jobs/{job_id}/resume")
@@ -447,11 +471,11 @@ async def answer_question(qid: int, body: AnswerBody,
         result["career_item_id"] = item.id
         job = db.get(Job, q.source_job) if q.source_job else None
         if job and job.jd_text:
-            report = services.tailor_and_store(db, job)
+            report = services.request_ai_tailor(db, job)
             result["retailored_job"] = job.id
-            result["new_match"] = report["match_score"]
-            await manager.broadcast({"type": "tailored", "job_id": job.id,
-                                     "match": report["match_score"]})
+            result["claude_connected"] = report["claude_connected"]
+            result["new_match"] = job.match   # internal signal; AI score follows
+            await manager.broadcast({"type": "tailoring", "job_id": job.id})
     db.commit()
     return result
 
@@ -610,10 +634,11 @@ def set_blocker(code: str, body: BlockerBody,
 
 @router.get("/status/runners")
 def runners(user: dict = Depends(current_user), db: Session = Depends(get_db)):
+    from db import age_seconds
     rows = db.execute(select(RunnerInfo)).scalars().all()
     return [{"id": r.id, "hostname": r.hostname,
              "last_heartbeat": r.last_heartbeat.isoformat(),
-             "online": (utcnow() - r.last_heartbeat).total_seconds() < 120}
+             "online": age_seconds(r.last_heartbeat) < 120}
             for r in rows]
 
 
@@ -666,6 +691,36 @@ async def complete(iid: int, body: CompleteBody,
         raise HTTPException(404, "no such intelligence job")
     job.status = body.status
     job.result = body.result
+    # tailor_full: the AI's COMPLETE plan (selection + summary + score). The
+    # honesty guard disposes of whatever the LLM proposed, no exceptions.
+    if job.kind == "tailor_full":
+        target = db.get(Job, (job.payload or {}).get("job_id", -1))
+        if body.status == "done":
+            ai_plan = body.result.get("plan")
+            if target and isinstance(ai_plan, dict):
+                violations = services.accept_ai_plan(
+                    db, target, ai_plan, body.result.get("llm_match"),
+                    body.result.get("analysis", ""))
+                if violations:
+                    job.status = "failed"
+                    job.result = {"rejected_by_honesty_guard": violations}
+            elif target:
+                job.status = "failed"
+                job.result = {"error": "AI returned no plan"}
+        # any failure: never leave the job stuck in 'tailoring' limbo — it
+        # returns to New Jobs (or stays tailored if an older plan exists)
+        # and the failure shows in Attention with a Retry button
+        if job.status == "failed" and target and target.status == "tailoring":
+            has_plan = db.execute(select(Plan).filter_by(job_id=target.id)
+                                  ).scalars().first() is not None
+            target.status = "tailored" if has_plan else "new"
+            db.add(StatusEvent(job_id=target.id, status=target.status,
+                               note="AI tailoring failed — see Attention to retry"))
+        db.commit()
+        await manager.broadcast({"type": "tailored",
+                                 "job_id": (job.payload or {}).get("job_id"),
+                                 "status": job.status})
+        return {"ok": True, "accepted": job.status == "done"}
     # a clean tailor_quality pass upgrades the plan it reviewed — but the
     # honesty guard disposes of whatever the LLM proposed, no exceptions
     if body.status == "done" and job.kind == "tailor_quality":

@@ -4,8 +4,10 @@ export type Role = "owner" | "viewer";
  * to "new"; discovered/enriched are legacy spellings of the same bucket. */
 export const NEW_BUCKET = ["new", "discovered", "enriched"] as const;
 
-/** Board columns, in display order. Rejected renders last and muted. */
+/** Board columns, in display order. "tailoring" = Claude is working on it;
+ * Rejected renders last and muted. */
 export const PIPELINE_STATUSES = [
+  "tailoring",
   "tailored",
   "applied",
   "interview",
@@ -31,14 +33,16 @@ export interface Job {
   added_at: string;
 }
 
-/** The score to show: the recruiter's if a quality pass produced one, else
- * the deterministic keyword score. Returns which source it came from. */
+/** The score to show: Claude's, whenever it exists. The script number only
+ * appears as a clearly-labeled fallback while Claude isn't hooked up. */
 export function displayMatch(job: {
   match: number | null;
   llm_match: number | null;
+  status?: string;
 }): { value: number | null; source: "recruiter" | "keyword" | null } {
   if (typeof job.llm_match === "number")
     return { value: job.llm_match, source: "recruiter" };
+  if (job.status === "tailoring") return { value: null, source: null };
   if (typeof job.match === "number")
     return { value: job.match, source: "keyword" };
   return { value: null, source: null };

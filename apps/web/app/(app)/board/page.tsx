@@ -196,7 +196,17 @@ function JobCard({ job, canDrag }: { job: Job; canDrag: boolean }) {
           <div className="truncate text-sm font-semibold">{job.company}</div>
           <div className="truncate text-xs text-dim">{job.role}</div>
         </div>
-        <MatchGauge score={m.value} size={38} source={m.source} />
+        {job.status === "tailoring" ? (
+          <span
+            className="chip chip-accent shrink-0"
+            title="Claude is tailoring this job now"
+          >
+            <span className="pulse inline-block h-1.5 w-1.5 rounded-full bg-accent" />
+            Claude…
+          </span>
+        ) : (
+          <MatchGauge score={m.value} size={38} source={m.source} />
+        )}
       </div>
     </Link>
   );

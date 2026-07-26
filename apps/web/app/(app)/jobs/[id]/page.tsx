@@ -65,12 +65,11 @@ export default function JobPage() {
     String(b.created_at).localeCompare(String(a.created_at))
   )[0];
 
-  // prefer the recruiter (LLM) score; else the freshest keyword score
+  // Claude's score whenever it exists; the script number only as a labeled
+  // fallback, and nothing while Claude is mid-tailor
   const dm = displayMatch(j);
-  const matchScore = dm.source === "recruiter" ? dm.value
-    : (tailorResult?.match_score ?? dm.value);
-  const matchSource: "recruiter" | "keyword" =
-    dm.source === "recruiter" ? "recruiter" : "keyword";
+  const matchScore = dm.value;
+  const matchSource = dm.source;
   const matched = tailorResult?.matched_keywords ?? j.matched_keywords ?? [];
   const missing = tailorResult?.missing_keywords ?? j.missing_keywords ?? [];
 
@@ -101,10 +100,34 @@ export default function JobPage() {
           </div>
         </div>
         <div className="flex flex-col items-center gap-1">
-          <MatchGauge score={matchScore} size={72} source={matchSource} />
-          <Eyebrow>{matchSource === "recruiter" ? "recruiter match" : "keyword match"}</Eyebrow>
+          {j.status === "tailoring" ? (
+            <>
+              <span className="chip chip-accent">
+                <span className="pulse inline-block h-1.5 w-1.5 rounded-full bg-accent" />
+                Claude is tailoring…
+              </span>
+              <Eyebrow>ai match pending</Eyebrow>
+            </>
+          ) : (
+            <>
+              <MatchGauge score={matchScore} size={72} source={matchSource} />
+              <Eyebrow>
+                {matchSource === "recruiter"
+                  ? "ai recruiter match"
+                  : matchSource === "keyword"
+                    ? "script match — Claude not hooked up"
+                    : "match"}
+              </Eyebrow>
+            </>
+          )}
         </div>
       </header>
+      {matchSource === "keyword" && j.status !== "tailoring" && (
+        <div className="chip chip-amber self-start" role="status">
+          Claude isn&apos;t hooked up — this is the script fallback. Start
+          everything with start.cmd and Claude will retailor this job.
+        </div>
+      )}
 
       {j.llm_analysis && (
         <section className="panel p-5">

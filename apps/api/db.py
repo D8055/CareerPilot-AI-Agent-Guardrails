@@ -17,6 +17,16 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def age_seconds(dt: datetime | None) -> float:
+    """Seconds since dt. SQLite hands back naive datetimes; we store UTC, so
+    treat naive as UTC (aware-vs-naive subtraction raises otherwise)."""
+    if dt is None:
+        return float("inf")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (utcnow() - dt).total_seconds()
+
+
 class Base(DeclarativeBase):
     pass
 

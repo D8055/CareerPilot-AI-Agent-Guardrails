@@ -206,3 +206,106 @@ def _parse_score(analysis: str) -> int | None:
     if not m:
         return None
     return max(0, min(100, int(m.group(1))))
+
+
+def _extract_json(text: str) -> dict | None:
+    """Pull the first JSON object out of an LLM reply (tolerates fences)."""
+    import json
+    import re
+    text = re.sub(r"```(?:json)?", "", text)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        out = json.loads(text[start:end + 1])
+        return out if isinstance(out, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def run_full_tailor(llm, company: str, jd_text: str, menu: dict,
+                    confirmations: str = "", validate=None) -> dict:
+    """Purely-AI tailoring: Claude analyzes the JD as a recruiter (score,
+    gaps, red flags), then authors the COMPLETE plan — which bullets, which
+    projects, skills order, and the summary — selecting only from the menu.
+    The API's validator is the final gate on whatever comes back."""
+    import json
+
+    system = (
+        f"Act as a senior technical recruiter for {company or 'this company'} "
+        "who also writes resumes. " + HUMANIZER_RULES
+    )
+    analyze_prompt = (
+        f"Job description:\n{jd_text[:4000]}\n\n"
+        "Candidate's verified content menu (JSON):\n"
+        + json.dumps(menu, indent=1)[:9000] + "\n\n"
+        + (f"Owner-confirmed extras: {confirmations[:800]}\n\n" if confirmations else "")
+        + "Analyze the candidate against this job description and give me:\n"
+          "1. A match score out of 100.\n"
+          "2. The top 5 missing keywords.\n"
+          "3. The 3 red flags a hiring manager would spot in under 10 seconds.\n\n"
+          "Start with a single line 'SCORE: N' (integer 0-100), then the analysis."
+    )
+    try:
+        analysis = llm(analyze_prompt, system).strip()
+    except Exception as e:
+        return {"error": str(e)}
+
+    plan_prompt = (
+        f"Job description:\n{jd_text[:3500]}\n\n"
+        f"Your recruiter analysis:\n{analysis[:2000]}\n\n"
+        "Verified content menu (you may ONLY select ids and reorder items "
+        "from it; every fact in your summary must appear in it):\n"
+        + json.dumps(menu, indent=1)[:9000] + "\n\n"
+        "Author the tailored resume plan for this job:\n"
+        "- For EVERY experience role (keep menu order): pick the bullets that "
+        "best sell this candidate for THIS job, within select_min..select_max.\n"
+        "- Pick exactly 3 projects, each with bullets within its bounds.\n"
+        "- Reorder every skills group so JD-relevant items lead (keep all "
+        "items, same groups, same order of groups).\n"
+        "- Write summary_text (25-80 words) per the menu's summary_rules. "
+        + XYZ + "\n\n"
+        "Output ONLY this JSON, nothing else:\n"
+        '{"summary_text": "...", "summary_bold": "", '
+        '"skills": [{"label": "...", "items": ["..."]}], '
+        '"experience": [{"id": "...", "bullets": ["bullet-id", "..."]}], '
+        '"projects": [{"id": "...", "bullets": ["bullet-id", "..."]}]}'
+    )
+    try:
+        raw = llm(plan_prompt, system)
+    except Exception as e:
+        return {"error": str(e)}
+    plan = _extract_json(raw)
+    if not plan:
+        return {"error": "AI tailor returned unparseable plan JSON"}
+
+    # repair loop: the validator's exact complaints go back to Claude
+    # (ONE round — each round is a full plan-priced call). The repair prompt
+    # deliberately omits the big menu; the plan + violations carry enough.
+    if validate is not None:
+        for _ in range(1):
+            violations = validate(plan)
+            if not violations:
+                break
+            repair_prompt = (
+                "Your resume plan was rejected by the validator for these "
+                "exact reasons:\n- " + "\n- ".join(str(v) for v in violations)
+                + "\n\nHere is the plan you produced:\n" + json.dumps(plan)
+                + "\n\nRules: select ids only (they must come from the plan "
+                "you already saw the menu for), ALL experience roles in the "
+                "original order, EXACTLY 3 distinct projects, bullet counts "
+                "within each select_min..select_max, every skills group "
+                "present in original group order (reorder items inside "
+                "only), summary 25-80 words using only facts you already "
+                "used. Return ONLY the corrected JSON, nothing else."
+            )
+            try:
+                raw = llm(repair_prompt, system)
+            except Exception as e:
+                return {"error": str(e)}
+            fixed = _extract_json(raw)
+            if fixed:
+                plan = fixed
+    return {"plan": plan, "analysis": analysis,
+            "llm_match": _parse_score(analysis)}

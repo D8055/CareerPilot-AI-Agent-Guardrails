@@ -23,7 +23,8 @@ def test_low_match_raises_questions_once_per_keyword(client, owner_headers):
     report = client.post(f"/jobs/{job['id']}/tailor",
                          json={"jd_text": LOW_MATCH_JD},
                          headers=owner_headers).json()
-    assert report["match_score"] < report["target_match"]
+    assert report["queued"] is True                     # AI pass always queued
+    assert report["status"] in ("tailoring", "tailored")
     assert 1 <= report["questions_created"] <= 5
 
     questions = client.get("/questions", headers=owner_headers).json()

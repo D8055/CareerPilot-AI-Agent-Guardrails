@@ -88,7 +88,7 @@ function NeedsYouBar() {
       )}
       {!c.runner_online && (
         <Link href="/settings" className="underline-offset-2 hover:underline">
-          quality passes paused
+          Claude not hooked up — tailoring falls back to the script
         </Link>
       )}
     </div>

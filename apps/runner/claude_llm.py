@@ -36,4 +36,11 @@ def ask_claude(prompt: str, system: str = "", max_turns: int = 1) -> str:
     except RunnerLLMError:
         raise
     except Exception as e:
-        raise RunnerLLMError(f"Claude Agent SDK call failed: {e}")
+        # transient SDK/CLI hiccups (seen in the wild: "returned an error
+        # result: success") get exactly one retry before failing the pass
+        import time
+        time.sleep(5)
+        try:
+            return anyio.run(_run)
+        except Exception:
+            raise RunnerLLMError(f"Claude Agent SDK call failed: {e}")
